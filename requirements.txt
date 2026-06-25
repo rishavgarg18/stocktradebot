@@ -1,0 +1,6 @@
+fastapi>=0.115
+uvicorn>=0.32
+yfinance>=0.2.50
+pandas>=2.2
+numpy>=1.26
+requests>=2.32

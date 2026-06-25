@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NSE Swing Signal Bot</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  body { background:#0b0f17; color:#e2e8f0; font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  ::-webkit-scrollbar{width:8px;height:8px} ::-webkit-scrollbar-thumb{background:#243044;border-radius:4px}
+  .card { background:#111827; border:1px solid #1f2937; border-radius:0.75rem; }
+  .badge-BUY{background:#052e1b;color:#34d399;border:1px solid #065f46}
+  .badge-SELL{background:#3b0d0d;color:#f87171;border:1px solid #7f1d1d}
+  .badge-WATCH{background:#2a2206;color:#fbbf24;border:1px solid #92400e}
+  .badge-HOLD{background:#1e293b;color:#94a3b8;border:1px solid #334155}
+  tr.rowhover:hover{background:#16203266;cursor:pointer}
+</style>
+</head>
+<body class="min-h-screen">
+<div class="max-w-[1500px] mx-auto p-5">
+
+  <!-- Header -->
+  <div class="flex flex-wrap items-center justify-between gap-4 mb-5">
+    <div>
+      <h1 class="text-2xl font-bold tracking-tight">NSE Swing Signal Bot</h1>
+      <p class="text-sm text-slate-400">Trend · Momentum · Timing · Volume — with ATR stops &amp; 1% risk sizing · ~2 years of daily data per stock</p>
+    </div>
+    <div class="flex items-center gap-3 flex-wrap">
+      <select id="mode" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+        <option value="swing">Swing (days–weeks)</option>
+        <option value="quick">Quick dip-buy (2-day hold)</option>
+      </select>
+      <select id="universe" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+        <option value="nifty50">Nifty 50</option>
+        <option value="nifty100">Nifty 100</option>
+        <option value="nifty200">Nifty 200</option>
+        <option value="nifty500" selected>Nifty 500</option>
+      </select>
+      <div class="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+        <span class="text-slate-400">Capital ₹</span>
+        <input id="capital" type="number" value="1000000" class="bg-transparent w-28 outline-none" />
+      </div>
+      <button id="scanBtn" onclick="startScan()"
+        class="bg-emerald-600 hover:bg-emerald-500 transition rounded-lg px-5 py-2 text-sm font-semibold">
+        Run Scan
+      </button>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div id="progressWrap" class="hidden mb-5">
+    <div class="flex justify-between text-xs text-slate-400 mb-1">
+      <span id="progressLabel">Downloading data…</span><span id="progressPct"></span>
+    </div>
+    <div class="h-2 bg-slate-800 rounded-full overflow-hidden">
+      <div id="progressBar" class="h-full bg-emerald-500 transition-all" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- Summary cards -->
+  <div id="summary" class="hidden grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+    <div class="card p-4"><div class="text-3xl font-bold text-emerald-400" id="nBuy">0</div><div class="text-xs text-slate-400 mt-1">BUY signals</div></div>
+    <div class="card p-4"><div class="text-3xl font-bold text-amber-400" id="nWatch">0</div><div class="text-xs text-slate-400 mt-1">Watchlist</div></div>
+    <div class="card p-4"><div class="text-3xl font-bold text-red-400" id="nSell">0</div><div class="text-xs text-slate-400 mt-1">SELL signals</div></div>
+    <div class="card p-4"><div class="text-3xl font-bold" id="nScanned">0</div><div class="text-xs text-slate-400 mt-1">Stocks analyzed · <span id="asOf"></span></div></div>
+  </div>
+
+  <!-- Paper trading -->
+  <div id="paperBar" class="card p-4 mb-5">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <div>
+        <h2 class="text-sm font-semibold">Paper Trading</h2>
+        <p class="text-xs text-slate-500">Pseudo trades — no real money. Buy from signals, sell when ready.</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="ltpUpdated" class="text-[11px] text-slate-500"></span>
+        <button onclick="loadPaper(true)" class="text-xs text-sky-400 hover:text-sky-300 border border-slate-700 rounded-lg px-3 py-1.5">Refresh LTP</button>
+        <button onclick="resetPaper()" class="text-xs text-slate-400 hover:text-red-400 border border-slate-700 rounded-lg px-3 py-1.5">Reset ledger</button>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+      <div class="bg-slate-800/50 rounded-lg p-3"><div class="text-[10px] text-slate-400">Equity</div><div id="pEquity" class="text-lg font-bold">—</div></div>
+      <div class="bg-slate-800/50 rounded-lg p-3"><div class="text-[10px] text-slate-400">Cash</div><div id="pCash" class="text-lg font-bold">—</div></div>
+      <div class="bg-slate-800/50 rounded-lg p-3"><div class="text-[10px] text-slate-400">Unrealized P&amp;L</div><div id="pUnreal" class="text-lg font-bold">—</div></div>
+      <div class="bg-slate-800/50 rounded-lg p-3"><div class="text-[10px] text-slate-400">Realized P&amp;L</div><div id="pReal" class="text-lg font-bold">—</div></div>
+      <div class="bg-slate-800/50 rounded-lg p-3"><div class="text-[10px] text-slate-400">Closed win rate</div><div id="pWinRate" class="text-lg font-bold">—</div></div>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div>
+        <div class="text-xs text-slate-400 font-semibold mb-2">OPEN POSITIONS (<span id="pOpenCount">0</span>)</div>
+        <div id="openPositions" class="text-xs text-slate-500">No open positions.</div>
+      </div>
+      <div>
+        <div class="text-xs text-slate-400 font-semibold mb-2">CLOSED TRADES (<span id="pClosedCount">0</span>)</div>
+        <div id="closedTrades" class="text-xs text-slate-500 max-h-40 overflow-auto">No closed trades yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
+    <!-- Signal table -->
+    <div class="xl:col-span-3">
+      <div class="card overflow-hidden">
+        <div class="flex items-center gap-2 p-3 border-b border-slate-800">
+          <button class="tab px-3 py-1.5 rounded-lg text-sm font-medium" data-f="BUY" onclick="setFilter('BUY')">Buy</button>
+          <button class="tab px-3 py-1.5 rounded-lg text-sm font-medium" data-f="WATCH" onclick="setFilter('WATCH')">Watch</button>
+          <button class="tab px-3 py-1.5 rounded-lg text-sm font-medium" data-f="SELL" onclick="setFilter('SELL')">Sell</button>
+          <button class="tab px-3 py-1.5 rounded-lg text-sm font-medium" data-f="ALL" onclick="setFilter('ALL')">All</button>
+          <input id="search" oninput="render()" placeholder="Search symbol…"
+            class="ml-auto bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm w-40 outline-none" />
+        </div>
+        <div class="overflow-auto max-h-[640px]">
+          <table class="w-full text-sm">
+            <thead class="text-xs text-slate-400 sticky top-0 bg-[#111827] z-10">
+              <tr class="text-left" id="theadRow"></tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+          <div id="emptyMsg" class="p-10 text-center text-slate-500 text-sm">Run a scan to see signals.</div>
+        </div>
+      </div>
+      <p class="text-[11px] text-slate-600 mt-3 leading-relaxed">
+        Educational research tool — not investment advice. Signals are rule-based on historical data;
+        past performance does not guarantee future results. Risk only what you can afford to lose.
+      </p>
+    </div>
+
+    <!-- Detail panel -->
+    <div class="xl:col-span-2">
+      <div id="detail" class="card p-4 min-h-[400px]">
+        <div id="detailEmpty" class="text-slate-500 text-sm p-10 text-center">Select a stock to see its chart, trade plan, and backtest.</div>
+        <div id="detailBody" class="hidden">
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <span id="dSymbol" class="text-xl font-bold"></span>
+              <span id="dAction" class="ml-2 text-xs font-semibold px-2 py-1 rounded-md"></span>
+            </div>
+            <div class="text-right">
+              <div id="dClose" class="text-lg font-semibold"></div>
+              <div id="dDate" class="text-xs text-slate-500"></div>
+            </div>
+          </div>
+          <div id="chart" class="w-full rounded-lg overflow-hidden border border-slate-800" style="height:300px"></div>
+
+          <div id="plan" class="grid grid-cols-4 gap-2 mt-3 text-center"></div>
+
+          <div id="paperActions" class="mt-3 hidden flex flex-wrap gap-2"></div>
+
+          <div class="mt-3">
+            <div class="text-xs text-slate-400 mb-1 font-semibold">PILLARS</div>
+            <div id="pillars" class="space-y-1.5"></div>
+          </div>
+
+          <div class="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <div class="text-xs text-slate-400 mb-1 font-semibold">WHY</div>
+              <ul id="reasons" class="text-xs text-slate-300 space-y-1 list-disc list-inside"></ul>
+            </div>
+            <div>
+              <div class="text-xs text-red-400 mb-1 font-semibold">RISK FLAGS</div>
+              <ul id="warnings" class="text-xs text-red-300 space-y-1 list-disc list-inside"></ul>
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <div class="text-xs text-slate-400 mb-1 font-semibold">BACKTEST (this strategy, this stock, ~2y)</div>
+            <div id="btStats" class="grid grid-cols-3 gap-2 text-center"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let results = [], filter = 'BUY', chart = null, candleSeries = null, poll = null, scanMode = 'swing';
+let paper = null, detailSymbol = null, paperRefreshTimer = null;
+
+function fmt(n){ return n==null ? '—' : Number(n).toLocaleString('en-IN',{maximumFractionDigits:2}); }
+function fmtPnl(n){
+  if (n==null) return '—';
+  const s = Number(n).toLocaleString('en-IN',{maximumFractionDigits:2});
+  return (n>=0?'+':'')+s;
+}
+function pnlClass(n){ return n==null?'text-slate-400':n>=0?'text-emerald-400':'text-red-400'; }
+
+async function loadPaper(refresh=false){
+  const url = refresh ? '/api/paper/portfolio?refresh=true' : '/api/paper/portfolio';
+  paper = await (await fetch(url)).json();
+  const ltpEl = document.getElementById('ltpUpdated');
+  if (paper.ltp_updated_at){
+    let txt = 'LTP ' + (paper.ltp_live ? 'live · ' : 'cached · ') + paper.ltp_updated_at;
+    if (paper.durable === false){
+      txt += ' · ⚠ trades NOT saved (attach Vercel KV to persist)';
+      ltpEl.className = 'text-[11px] text-amber-400';
+    } else {
+      ltpEl.className = 'text-[11px] text-slate-500';
+    }
+    ltpEl.textContent = txt;
+  }
+  schedulePaperRefresh();
+  document.getElementById('pEquity').textContent = '₹'+fmt(paper.equity);
+  document.getElementById('pCash').textContent = '₹'+fmt(paper.cash);
+  document.getElementById('pUnreal').className = 'text-lg font-bold '+pnlClass(paper.unrealized_pnl);
+  document.getElementById('pUnreal').textContent = fmtPnl(paper.unrealized_pnl);
+  document.getElementById('pReal').className = 'text-lg font-bold '+pnlClass(paper.realized_pnl);
+  document.getElementById('pReal').textContent = fmtPnl(paper.realized_pnl);
+  document.getElementById('pWinRate').textContent = paper.win_rate!=null ? paper.win_rate+'%' : '—';
+  document.getElementById('pOpenCount').textContent = paper.open_count;
+  document.getElementById('pClosedCount').textContent = paper.closed_count;
+
+  const openEl = document.getElementById('openPositions');
+  if (!paper.open_positions.length){
+    openEl.innerHTML = '<div class="text-slate-500">No open positions.</div>';
+  } else {
+    openEl.innerHTML = `<table class="w-full text-xs"><thead><tr class="text-slate-400 text-left">
+      <th class="py-1">Symbol</th><th class="text-right">Qty</th><th class="text-right">Entry</th>
+      <th class="text-right">LTP</th><th class="text-right">P&amp;L</th><th></th></tr></thead><tbody>` +
+      paper.open_positions.map(p=>`<tr class="border-t border-slate-800/60">
+        <td class="py-1.5 font-semibold">${p.symbol}</td>
+        <td class="text-right">${p.qty}</td>
+        <td class="text-right">₹${fmt(p.entry_price)}</td>
+        <td class="text-right">₹${fmt(p.current_price)}</td>
+        <td class="text-right ${pnlClass(p.unrealized_pnl)}">${fmtPnl(p.unrealized_pnl)} (${fmtPnl(p.unrealized_pnl_pct)}%)</td>
+        <td class="text-right"><button onclick="event.stopPropagation();paperSell('${p.id}')"
+          class="bg-red-600/80 hover:bg-red-500 text-white rounded px-2 py-0.5 text-[11px] font-semibold">Sell</button></td>
+      </tr>`).join('') + '</tbody></table>';
+  }
+
+  const closedEl = document.getElementById('closedTrades');
+  if (!paper.closed_trades.length){
+    closedEl.innerHTML = '<div class="text-slate-500">No closed trades yet.</div>';
+  } else {
+    closedEl.innerHTML = `<table class="w-full text-xs"><thead><tr class="text-slate-400 text-left">
+      <th class="py-1">Symbol</th><th class="text-right">Entry→Exit</th><th class="text-right">P&amp;L</th><th class="text-right">%</th></tr></thead><tbody>` +
+      paper.closed_trades.map(t=>`<tr class="border-t border-slate-800/60">
+        <td class="py-1.5">${t.symbol}</td>
+        <td class="text-right text-slate-400">₹${fmt(t.entry_price)}→₹${fmt(t.exit_price)}</td>
+        <td class="text-right ${pnlClass(t.pnl)}">${fmtPnl(t.pnl)}</td>
+        <td class="text-right ${pnlClass(t.pnl)}">${fmtPnl(t.pnl_pct)}%</td>
+      </tr>`).join('') + '</tbody></table>';
+  }
+  if (detailSymbol) updatePaperActions(detailSymbol);
+}
+
+function schedulePaperRefresh(){
+  if (paperRefreshTimer) clearInterval(paperRefreshTimer);
+  if (paper?.open_count > 0){
+    paperRefreshTimer = setInterval(()=>loadPaper(true), 60000);
+  }
+}
+
+async function paperBuyFromSignal(symbol, ev){
+  if (ev) ev.stopPropagation();
+  const sig = results.find(r=>r.symbol===symbol);
+  if (!sig){ alert('Run a scan first, then buy from a signal.'); return; }
+  const qty = sig.qty_for_1pct_risk || Math.max(1, Math.floor(10000 / sig.close));
+  const body = {
+    symbol,
+    qty,
+    strategy: scanMode,
+    price: sig.close || sig.entry,
+    stop_loss: sig.stop_loss || null,
+    target1: sig.target1 || null,
+    target2: sig.target2 || null,
+    notes: scanMode==='quick'
+      ? `${sig.is_watch?'WATCH ':''}hist win ${sig.hist_win_rate}%`
+      : `score ${sig.score}`,
+  };
+  if (sig.is_watch && !confirm(`${symbol} is a NEAR-MISS (failed: ${(sig.failed_gates||[]).join(', ')}).\n\nIt did NOT pass all strict gates. Buy anyway?`)) return;
+  const r = await fetch('/api/paper/buy', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const d = await r.json();
+  if (!r.ok){ alert(d.detail || 'Buy failed'); return; }
+  paper = d.portfolio;
+  await loadPaper();
+  alert(`Paper bought ${qty} ${symbol} @ ₹${fmt(body.price)}`);
+}
+
+async function paperSell(tradeId){
+  const r = await fetch(`/api/paper/sell/${tradeId}`, {method:'POST'});
+  const d = await r.json();
+  if (!r.ok){ alert(d.detail || 'Sell failed'); return; }
+  const t = d.trade;
+  paper = d.portfolio;
+  await loadPaper();
+  alert(`Sold ${t.symbol} @ ₹${fmt(t.exit_price)}\nP&L: ${fmtPnl(t.pnl)} (${fmtPnl(t.pnl_pct)}%)`);
+}
+
+async function resetPaper(){
+  if (!confirm('Reset paper trading ledger? All open & closed trades will be cleared.')) return;
+  const cap = document.getElementById('capital').value || 1000000;
+  await fetch(`/api/paper/reset?starting_capital=${cap}`, {method:'POST'});
+  await loadPaper();
+}
+
+function updatePaperActions(symbol){
+  const el = document.getElementById('paperActions');
+  const sig = results.find(r=>r.symbol===symbol);
+  const open = paper?.open_positions?.find(p=>p.symbol===symbol);
+  if (!sig && !open){ el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  if (open){
+    el.innerHTML = `<div class="w-full text-xs bg-slate-800/60 rounded-lg p-2 mb-1">
+      Holding <b>${open.qty}</b> @ ₹${fmt(open.entry_price)} · unrealized ${fmtPnl(open.unrealized_pnl)} (${fmtPnl(open.unrealized_pnl_pct)}%)
+    </div>
+    <button onclick="paperSell('${open.id}')" class="bg-red-600 hover:bg-red-500 rounded-lg px-4 py-2 text-sm font-semibold">Sell @ market</button>`;
+  } else if (sig && (scanMode==='quick' || sig.action==='BUY')){
+    const qty = sig.qty_for_1pct_risk || Math.max(1, Math.floor(10000/sig.close));
+    el.innerHTML = `<button onclick="paperBuyFromSignal('${symbol}')"
+      class="bg-emerald-600 hover:bg-emerald-500 rounded-lg px-4 py-2 text-sm font-semibold">
+      Paper Buy ${qty} shares @ ₹${fmt(sig.close||sig.entry)}
+    </button>`;
+  } else {
+    el.innerHTML = `<div class="text-xs text-slate-500">Not a current BUY signal — paper buy disabled.</div>`;
+  }
+}
+
+function setFilter(f){
+  filter = f;
+  document.querySelectorAll('.tab').forEach(b=>{
+    const on = b.dataset.f===f;
+    b.className = 'tab px-3 py-1.5 rounded-lg text-sm font-medium ' +
+      (on ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200');
+  });
+  render();
+}
+
+async function startScan(){
+  const u = document.getElementById('universe').value;
+  const cap = document.getElementById('capital').value || 1000000;
+  const m = document.getElementById('mode').value;
+  document.getElementById('scanBtn').disabled = true;
+  document.getElementById('scanBtn').textContent = 'Scanning…';
+  document.getElementById('progressWrap').classList.remove('hidden');
+  document.getElementById('progressBar').style.width = '100%';
+  document.getElementById('progressPct').textContent = '';
+  document.getElementById('progressLabel').textContent =
+    'Downloading data & evaluating… (first scan can take up to a minute)';
+  // Synchronous scan: works on serverless (Vercel) and locally. The request
+  // returns the finished result directly — no separate status poll needed.
+  try {
+    const res = await fetch(`/api/scan?universe=${u}&capital=${cap}&mode=${m}&sync=true`, {method:'POST'});
+    // The server may return a non-JSON error page (e.g. a 504 timeout on
+    // serverless). Read as text first and parse defensively so the user gets a
+    // clear message instead of a cryptic "Unexpected token" SyntaxError.
+    const raw = await res.text();
+    let s;
+    try { s = JSON.parse(raw); }
+    catch {
+      if (res.status === 504 || /timeout|timed out/i.test(raw)) {
+        throw new Error('The scan took too long and timed out on the server. '
+          + 'Try a smaller universe (Nifty 50 or 100) and re-run — data is cached '
+          + 'after the first scan, so the next one is much faster.');
+      }
+      throw new Error(`Server returned status ${res.status}. Please retry in a moment.`);
+    }
+    if (!res.ok || s.status === 'error') {
+      throw new Error(s.error || s.detail || `Scan failed (status ${res.status})`);
+    }
+    results = s.results || [];
+    scanMode = s.mode || m;
+    updateSummary();
+    render();
+  } catch(e){
+    alert('Scan failed: ' + (e.message || e));
+  } finally {
+    document.getElementById('scanBtn').disabled = false;
+    document.getElementById('scanBtn').textContent = 'Run Scan';
+    document.getElementById('progressWrap').classList.add('hidden');
+  }
+}
+
+async function checkStatus(){
+  const s = await (await fetch('/api/scan/status')).json();
+  const pct = s.total ? Math.round(100*s.progress/s.total) : 0;
+  document.getElementById('progressBar').style.width = pct+'%';
+  document.getElementById('progressPct').textContent = `${s.progress}/${s.total}`;
+  document.getElementById('progressLabel').textContent =
+    s.status==='running' ? 'Downloading data & evaluating…' : s.status;
+  if (s.status==='done' || s.status==='error'){
+    clearInterval(poll);
+    document.getElementById('scanBtn').disabled = false;
+    document.getElementById('scanBtn').textContent = 'Run Scan';
+    document.getElementById('progressWrap').classList.add('hidden');
+    if (s.status==='error'){ alert('Scan failed: '+s.error); return; }
+    results = s.results;
+    scanMode = s.mode || 'swing';
+    updateSummary();
+    render();
+  }
+}
+
+function updateSummary(){
+  document.getElementById('summary').classList.remove('hidden');
+  if (scanMode==='quick'){
+    document.getElementById('nBuy').textContent = results.length;
+    document.getElementById('nWatch').textContent = '—';
+    document.getElementById('nSell').textContent = '—';
+  } else {
+    const c = a => results.filter(r=>r.action===a).length;
+    document.getElementById('nBuy').textContent = c('BUY');
+    document.getElementById('nWatch').textContent = c('WATCH');
+    document.getElementById('nSell').textContent = c('SELL');
+  }
+  document.getElementById('nScanned').textContent = results.length;
+  document.getElementById('asOf').textContent = results[0]?.as_of || '';
+}
+
+const TH = c => `<th class="px-2 py-2 ${c||''}">`;
+function render(){
+  const q = document.getElementById('search').value.toUpperCase();
+  const quick = scanMode==='quick';
+  document.querySelectorAll('.tab').forEach(b=>b.style.display = quick ? 'none':'');
+  const thead = document.getElementById('theadRow');
+
+  if (quick){
+    thead.innerHTML = `<th class="px-3 py-2">Symbol</th>${TH()}Hist win %</th>${TH('text-right')}Trades</th>
+      ${TH('text-right')}PF</th>${TH('text-right')}1M win %</th>
+      ${TH('text-right')}Close</th>${TH('text-right')}Stop</th>${TH('text-right')}Qty</th>
+      ${TH('text-right')}Avg net %</th>${TH('text-right')}Worst %</th><th class="px-2 py-2"></th>`;
+    let rows = results.filter(r=>r.symbol.includes(q));
+    const signals = rows.filter(r=>!r.is_watch);
+    const watch = rows.filter(r=>r.is_watch);
+    document.getElementById('emptyMsg').style.display = rows.length ? 'none':'block';
+    document.getElementById('emptyMsg').textContent = rows.length ? '' :
+      'No qualifying setups or near-misses today. Markets were quiet — waiting is part of the edge.';
+
+    const quickRow = (r)=>`
+      <tr class="rowhover border-t border-slate-800/60 ${r.is_watch?'bg-amber-500/5':''}" onclick="openDetail('${r.symbol}')"
+          title="${r.is_watch?(r.failed_gates||[]).join(' · '):''}">
+        <td class="px-3 py-2 font-semibold">
+          ${r.symbol}
+          ${r.is_watch?'<span class="ml-1.5 align-middle text-[9px] font-bold uppercase tracking-wide bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded">watch</span>':''}
+        </td>
+        <td class="px-2 py-2">
+          <div class="inline-flex items-center gap-1.5">
+            <div class="w-12 h-1.5 bg-slate-800 rounded-full overflow-hidden"><div class="h-full ${r.hist_win_rate>=70?'bg-emerald-500':'bg-amber-500'}" style="width:${r.hist_win_rate}%"></div></div>
+            <span class="text-xs font-semibold ${r.hist_win_rate>=70?'text-emerald-400':'text-amber-400'}">${r.hist_win_rate}%</span>
+          </div>
+        </td>
+        <td class="px-2 py-2 text-right">${r.hist_trades}</td>
+        <td class="px-2 py-2 text-right">${fmt(r.hist_profit_factor)}</td>
+        <td class="px-2 py-2 text-right ${r.recent_win_rate>=50?'text-emerald-400':r.recent_win_rate!=null?'text-red-400':'text-slate-500'}">${r.recent_win_rate!=null?r.recent_win_rate+'%':'—'}</td>
+        <td class="px-2 py-2 text-right">${fmt(r.close)}</td>
+        <td class="px-2 py-2 text-right text-red-300">${fmt(r.stop_loss)}</td>
+        <td class="px-2 py-2 text-right">${fmt(r.qty_for_1pct_risk)}</td>
+        <td class="px-2 py-2 text-right ${r.hist_avg_pnl_pct>0?'text-emerald-400':'text-red-400'}">${fmt(r.hist_avg_pnl_pct)}</td>
+        <td class="px-2 py-2 text-right text-red-300">${fmt(r.hist_worst_pct)}</td>
+        <td class="px-2 py-2"><button onclick="paperBuyFromSignal('${r.symbol}', event)"
+          class="${r.is_watch?'bg-amber-700 hover:bg-amber-600':'bg-emerald-700 hover:bg-emerald-600'} text-white rounded px-2 py-0.5 text-[11px] font-semibold">Buy</button></td>
+      </tr>`;
+
+    const divider = (label)=>`<tr><td colspan="11" class="px-3 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">${label}</td></tr>`;
+
+    let html = '';
+    if (signals.length) html += divider(`✓ Qualified signals (passed all gates)`) + signals.map(quickRow).join('');
+    if (watch.length) html += divider(`⚠ Near-miss watchlist — failed 1-2 gates, review manually`) + watch.map(quickRow).join('');
+    document.getElementById('tbody').innerHTML = html;
+    return;
+  }
+
+  thead.innerHTML = `<th class="px-3 py-2">Symbol</th>${TH()}Action</th>${TH('text-right')}Score</th>
+    ${TH('text-right')}Close</th>${TH('text-right')}Stop</th>${TH('text-right')}T1 / T2</th>
+    ${TH('text-right')}Qty</th>${TH('text-right')}RS 3m</th><th class="px-2 py-2"></th>`;
+  let rows = results.filter(r => (filter==='ALL' || r.action===filter) && r.symbol.includes(q));
+  document.getElementById('emptyMsg').style.display = rows.length ? 'none':'block';
+  document.getElementById('emptyMsg').textContent = 'Run a scan to see signals.';
+  document.getElementById('tbody').innerHTML = rows.map(r=>`
+    <tr class="rowhover border-t border-slate-800/60" onclick="openDetail('${r.symbol}')">
+      <td class="px-3 py-2 font-semibold">${r.symbol}</td>
+      <td class="px-2 py-2"><span class="badge-${r.action} text-[11px] font-semibold px-2 py-0.5 rounded-md">${r.action}</span></td>
+      <td class="px-2 py-2 text-right">
+        <div class="inline-flex items-center gap-1.5">
+          <div class="w-12 h-1.5 bg-slate-800 rounded-full overflow-hidden"><div class="h-full ${r.score>=70?'bg-emerald-500':r.score>=55?'bg-amber-500':'bg-slate-600'}" style="width:${r.score}%"></div></div>
+          <span class="text-xs">${r.score}</span>
+        </div>
+      </td>
+      <td class="px-2 py-2 text-right">${fmt(r.close)}</td>
+      <td class="px-2 py-2 text-right text-red-300">${fmt(r.stop_loss)}</td>
+      <td class="px-2 py-2 text-right text-emerald-300 text-xs">${fmt(r.target1)} / ${fmt(r.target2)}</td>
+      <td class="px-2 py-2 text-right">${fmt(r.qty_for_1pct_risk)}</td>
+      <td class="px-2 py-2 text-right ${r.rs_vs_nifty_3m>0?'text-emerald-400':'text-red-400'}">${fmt(r.rs_vs_nifty_3m)}</td>
+      <td class="px-2 py-2">${r.action==='BUY'?`<button onclick="paperBuyFromSignal('${r.symbol}', event)"
+        class="bg-emerald-700 hover:bg-emerald-600 text-white rounded px-2 py-0.5 text-[11px] font-semibold">Buy</button>`:''}</td>
+    </tr>`).join('');
+}
+
+async function openDetail(symbol){
+  detailSymbol = symbol;
+  const d = await (await fetch(`/api/stock/${symbol}`)).json();
+  document.getElementById('detailEmpty').classList.add('hidden');
+  document.getElementById('detailBody').classList.remove('hidden');
+
+  const s = d.signal || {};
+  document.getElementById('dSymbol').textContent = symbol;
+  const act = document.getElementById('dAction');
+  act.textContent = s.action || '—';
+  act.className = `ml-2 text-xs font-semibold px-2 py-1 rounded-md badge-${s.action||'HOLD'}`;
+  document.getElementById('dClose').textContent = '₹'+fmt(s.close);
+  document.getElementById('dDate').textContent = 'as of '+(s.as_of||'');
+
+  // trade plan
+  const plan = document.getElementById('plan');
+  if (s.entry){
+    plan.innerHTML = [
+      ['Entry', fmt(s.entry), 'text-slate-200'],
+      ['Stop', fmt(s.stop_loss), 'text-red-300'],
+      ['Target 2R', fmt(s.target1), 'text-emerald-300'],
+      ['Target 3R', fmt(s.target2), 'text-emerald-300'],
+    ].map(([l,v,c])=>`<div class="bg-slate-800/60 rounded-lg p-2"><div class="text-[10px] text-slate-400">${l}</div><div class="text-sm font-semibold ${c}">₹${v}</div></div>`).join('')
+    + `<div class="col-span-4 text-[11px] text-slate-400 mt-1">Buy <b class="text-slate-200">${fmt(s.qty_for_1pct_risk)}</b> shares to risk 1% of capital (₹${fmt(s.risk_per_share)} risk/share)</div>`;
+  } else {
+    plan.innerHTML = `<div class="col-span-4 text-xs text-slate-500">No active trade plan (action: ${s.action||'—'})</div>`;
+  }
+
+  // pillars
+  const max = {trend:30, momentum:25, timing:25, volume:20};
+  document.getElementById('pillars').innerHTML = Object.entries(s.pillar_scores||{}).map(([k,v])=>`
+    <div class="flex items-center gap-2 text-xs">
+      <span class="w-20 text-slate-400 capitalize">${k}</span>
+      <div class="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden"><div class="h-full bg-sky-500" style="width:${100*v/max[k]}%"></div></div>
+      <span class="w-12 text-right text-slate-300">${v}/${max[k]}</span>
+    </div>`).join('');
+
+  let reasons = s.reasons||[], warnings = s.warnings||[];
+  if (scanMode==='quick'){
+    const qr = results.find(r=>r.symbol===symbol);
+    if (qr){
+      reasons = [...qr.reasons, ...(qr.fundamental_notes||[]), qr.entry_note];
+      warnings = qr.warnings||[];
+    }
+  }
+  document.getElementById('reasons').innerHTML = reasons.map(r=>`<li>${r}</li>`).join('') || '<li class="list-none text-slate-600">—</li>';
+  document.getElementById('warnings').innerHTML = warnings.map(r=>`<li>${r}</li>`).join('') || '<li class="list-none text-slate-600">none</li>';
+
+  // backtest
+  const bt = d.backtest;
+  document.getElementById('btStats').innerHTML = bt && bt.trades.length ? [
+    ['Trades', bt.trades.length], ['Win rate', bt.win_rate+'%'], ['Profit factor', bt.profit_factor],
+    ['Avg R', bt.avg_r], ['Strategy return', bt.total_return_pct+'%'], ['Max drawdown', bt.max_drawdown_pct+'%'],
+  ].map(([l,v])=>`<div class="bg-slate-800/60 rounded-lg p-2"><div class="text-[10px] text-slate-400">${l}</div><div class="text-sm font-semibold">${v}</div></div>`).join('')
+  : '<div class="col-span-3 text-xs text-slate-500">No qualifying trades in the backtest window.</div>';
+
+  drawChart(d.candles, s);
+  updatePaperActions(symbol);
+}
+
+function drawChart(candles, s){
+  const el = document.getElementById('chart');
+  el.innerHTML = '';
+  chart = LightweightCharts.createChart(el, {
+    height: 300, layout:{background:{color:'#0d1320'}, textColor:'#94a3b8'},
+    grid:{vertLines:{color:'#16203233'}, horzLines:{color:'#16203233'}},
+    rightPriceScale:{borderColor:'#1f2937'}, timeScale:{borderColor:'#1f2937'},
+  });
+  candleSeries = chart.addCandlestickSeries({
+    upColor:'#10b981', downColor:'#ef4444', borderVisible:false,
+    wickUpColor:'#10b981', wickDownColor:'#ef4444',
+  });
+  candleSeries.setData(candles.map(c=>({time:c.time, open:c.open, high:c.high, low:c.low, close:c.close})));
+
+  const sma50 = chart.addLineSeries({color:'#38bdf8', lineWidth:1, priceLineVisible:false, lastValueVisible:false});
+  sma50.setData(candles.filter(c=>c.sma50!=null).map(c=>({time:c.time, value:c.sma50})));
+  const sma200 = chart.addLineSeries({color:'#f59e0b', lineWidth:1, priceLineVisible:false, lastValueVisible:false});
+  sma200.setData(candles.filter(c=>c.sma200!=null).map(c=>({time:c.time, value:c.sma200})));
+
+  if (s && s.entry){
+    [[s.stop_loss,'#ef4444','Stop'],[s.target1,'#10b981','2R'],[s.target2,'#34d399','3R']].forEach(([p,color,title])=>{
+      candleSeries.createPriceLine({price:p, color, lineWidth:1, lineStyle:2, title});
+    });
+  }
+  chart.timeScale().fitContent();
+}
+
+setFilter('BUY');
+loadPaper(true);
+</script>
+</body>
+</html>
