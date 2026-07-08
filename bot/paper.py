@@ -10,17 +10,24 @@ import json
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from datetime import datetime, timezone
+import pandas as pd
 
 from .data import get_history, get_ltp
+from .indicators import enrich, rsi
+from .meanrev import HOLD_BARS, RSI2_EXIT_EARLY
 from .storage import CACHE_BASE, kv_enabled, kv_get, kv_set, storage_kind
+from .strategy import _sell_checks
 
 LEDGER_PATH = CACHE_BASE / "paper_portfolio.json"
 KV_KEY = "paper_portfolio"
 _lock = threading.Lock()
+
+SYMBOL_COOLDOWN_DAYS = 5
+MAX_OPEN_QUICK = 3
+SWING_MAX_HOLD_BARS = 60
 
 
 @dataclass
@@ -44,16 +51,16 @@ class PaperTrade:
 
 @dataclass
 class PaperPortfolio:
-    starting_capital: float = 1_000_000
-    cash: float = 1_000_000
+    starting_capital: float = 20_000
+    cash: float = 20_000
     trades: list[PaperTrade] = field(default_factory=list)
 
 
 def _raw_to_portfolio(raw: dict) -> PaperPortfolio:
     trades = [PaperTrade(**t) for t in raw.get("trades", [])]
     return PaperPortfolio(
-        starting_capital=raw.get("starting_capital", 1_000_000),
-        cash=raw.get("cash", raw.get("starting_capital", 1_000_000)),
+        starting_capital=raw.get("starting_capital", 20_000),
+        cash=raw.get("cash", raw.get("starting_capital", 20_000)),
         trades=trades,
     )
 
@@ -109,19 +116,133 @@ def _closed_trades(portfolio: PaperPortfolio) -> list[PaperTrade]:
     return [t for t in portfolio.trades if t.status == "closed"]
 
 
+def _last_closed_date(portfolio: PaperPortfolio, symbol: str) -> date | None:
+    symbol = symbol.upper()
+    closed = [t for t in _closed_trades(portfolio) if t.symbol == symbol and t.exit_date]
+    if not closed:
+        return None
+    return max(datetime.strptime(t.exit_date, "%Y-%m-%d").date() for t in closed)
+
+
+def _close_trade(trade: PaperTrade, exit_px: float, reason: str) -> None:
+    exit_px = round(exit_px, 2)
+    proceeds = round(exit_px * trade.qty, 2)
+    cost_basis = round(trade.entry_price * trade.qty, 2)
+    trade.status = "closed"
+    trade.exit_price = exit_px
+    trade.exit_date = str(date.today())
+    trade.pnl = round(proceeds - cost_basis, 2)
+    trade.pnl_pct = round((exit_px / trade.entry_price - 1) * 100, 2)
+    suffix = f" | auto: {reason}"
+    trade.notes = (trade.notes + suffix).strip()
+
+
+def _quick_exit(trade: PaperTrade, df: pd.DataFrame) -> tuple[float, str] | None:
+    e = df.copy()
+    e["rsi2"] = rsi(e["Close"], 2)
+    entry_ts = pd.Timestamp(trade.entry_date)
+    after = e.loc[e.index >= entry_ts]
+    if len(after) < 2:
+        return None
+
+    stop = trade.stop_loss
+    for offset in range(len(after)):
+        bar = after.iloc[offset]
+        if stop is not None and float(bar.Low) <= stop:
+            return stop, "stop"
+        if offset == 1 and float(bar["rsi2"]) >= RSI2_EXIT_EARLY:
+            return float(bar.Close), "rsi-exit"
+        if offset >= HOLD_BARS:
+            return float(bar.Close), "day2-close"
+    return None
+
+
+def _swing_exit(trade: PaperTrade, df: pd.DataFrame) -> tuple[float, str] | None:
+    e = enrich(df)
+    e["sma50_slope"] = e["sma50"].diff(5)
+    e["sma200_slope"] = e["sma200"].diff(10)
+    e = e.dropna(subset=["sma200", "atr14"])
+    if e.empty:
+        return None
+
+    entry_ts = pd.Timestamp(trade.entry_date)
+    mask = e.index >= entry_ts
+    if not mask.any():
+        return None
+    start_i = int(e.index.get_indexer([e.index[mask][0]])[0])
+
+    stop = trade.stop_loss or 0.0
+    t1 = trade.target1
+    t2 = trade.target2
+
+    for i in range(start_i, len(e)):
+        bar = e.iloc[i]
+        bars_held = i - start_i
+        if stop and float(bar.Low) <= stop:
+            return stop, "stop"
+        if t2 and float(bar.High) >= t2:
+            return t2, "target2"
+        if t1 and float(bar.High) >= t1:
+            return t1, "target1"
+        if bars_held >= SWING_MAX_HOLD_BARS:
+            return float(bar.Close), "time"
+        flags = _sell_checks(bar, e.iloc[: i + 1])
+        if len(flags) >= 2:
+            return float(bar.Close), "sell-signal"
+    return None
+
+
+def check_exits() -> list[PaperTrade]:
+    """Auto-close open positions when strategy exit rules fire."""
+    closed: list[PaperTrade] = []
+    with _lock:
+        pf = _load()
+        cash_delta = 0.0
+        for trade in _open_trades(pf):
+            df = get_history(trade.symbol)
+            if df is None or df.empty:
+                continue
+            result = (
+                _quick_exit(trade, df)
+                if trade.strategy == "quick"
+                else _swing_exit(trade, df)
+            )
+            if result is None:
+                continue
+            exit_px, reason = result
+            _close_trade(trade, exit_px, reason)
+            cash_delta += round(exit_px * trade.qty, 2)
+            closed.append(trade)
+        if closed:
+            pf.cash = round(pf.cash + cash_delta, 2)
+            _save(pf)
+    return closed
+
+
 def buy(
     symbol: str,
     qty: int,
-    strategy: str = "swing",
+    strategy: str = "quick",
     price: float | None = None,
     stop_loss: float | None = None,
     target1: float | None = None,
     target2: float | None = None,
     notes: str = "",
+    tier: str | None = None,
 ) -> PaperTrade:
     symbol = symbol.upper()
     if qty <= 0:
         raise ValueError("quantity must be positive")
+
+    if strategy != "quick":
+        raise ValueError("only quick strategy is supported")
+
+    notes_lower = notes.lower()
+    if tier == "review" or tier == "extended" or "watch" in notes_lower:
+        raise ValueError(
+            "paper buy only allowed for qualified quick signals — "
+            "review/extended/WATCH tiers are not auto-buy eligible"
+        )
 
     entry = price if price is not None else latest_price(symbol)
     if entry is None:
@@ -133,6 +254,22 @@ def buy(
         pf = _load()
         if any(t.symbol == symbol and t.status == "open" for t in pf.trades):
             raise ValueError(f"already holding an open paper position in {symbol}")
+
+        if strategy == "quick":
+            open_quick = sum(1 for t in _open_trades(pf) if t.strategy == "quick")
+            if open_quick >= MAX_OPEN_QUICK:
+                raise ValueError(
+                    f"max {MAX_OPEN_QUICK} open quick positions — close one before buying"
+                )
+
+        last_closed = _last_closed_date(pf, symbol)
+        if last_closed is not None:
+            cooldown_end = last_closed + timedelta(days=SYMBOL_COOLDOWN_DAYS)
+            if date.today() < cooldown_end:
+                raise ValueError(
+                    f"{symbol} cooldown active until {cooldown_end} "
+                    f"({SYMBOL_COOLDOWN_DAYS} days after last exit)"
+                )
 
         if cost > pf.cash + 0.01:
             raise ValueError(
@@ -157,7 +294,7 @@ def buy(
         return trade
 
 
-def sell(trade_id: str, price: float | None = None) -> PaperTrade:
+def sell(trade_id: str, price: float | None = None, reason: str = "manual") -> PaperTrade:
     with _lock:
         pf = _load()
         trade = next((t for t in pf.trades if t.id == trade_id and t.status == "open"), None)
@@ -168,23 +305,13 @@ def sell(trade_id: str, price: float | None = None) -> PaperTrade:
         if exit_px is None:
             raise ValueError(f"no price data for {trade.symbol}")
 
-        exit_px = round(exit_px, 2)
-        proceeds = round(exit_px * trade.qty, 2)
-        cost_basis = round(trade.entry_price * trade.qty, 2)
-        pnl = round(proceeds - cost_basis, 2)
-        pnl_pct = round((exit_px / trade.entry_price - 1) * 100, 2)
-
-        trade.status = "closed"
-        trade.exit_price = exit_px
-        trade.exit_date = str(date.today())
-        trade.pnl = pnl
-        trade.pnl_pct = pnl_pct
-        pf.cash = round(pf.cash + proceeds, 2)
+        _close_trade(trade, exit_px, reason)
+        pf.cash = round(pf.cash + round(exit_px * trade.qty, 2), 2)
         _save(pf)
         return trade
 
 
-def reset_portfolio(starting_capital: float = 1_000_000) -> PaperPortfolio:
+def reset_portfolio(starting_capital: float = 20_000) -> PaperPortfolio:
     with _lock:
         pf = PaperPortfolio(starting_capital=starting_capital, cash=starting_capital, trades=[])
         _save(pf)
@@ -192,6 +319,9 @@ def reset_portfolio(starting_capital: float = 1_000_000) -> PaperPortfolio:
 
 
 def portfolio_view(*, refresh_prices: bool = False) -> dict:
+    if refresh_prices:
+        check_exits()
+
     pf = _load()
     open_t = _open_trades(pf)
     closed_t = _closed_trades(pf)

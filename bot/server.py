@@ -14,23 +14,30 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .backtest import run_backtest
 from .data import get_histories, get_history
-from .meanrev import quick_watchlist, scan_quick
+from .meanrev import DEFAULT_CAPITAL, evaluate_quick, run_quick_scan
 from .paper import buy as paper_buy
-from .paper import portfolio_view, reset_portfolio, sell as paper_sell
-from .strategy import DEFAULT_CAPITAL, evaluate, nifty_roc63_from
+from .paper import check_exits, portfolio_view, reset_portfolio, sell as paper_sell
 from .universe import INDEX_CSV_URLS, NIFTY_INDEX_TICKER, get_universe
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
-app = FastAPI(title="NSE Swing Signal Bot")
+app = FastAPI(title="NSE Quick Dip Bot")
 
 _scan_lock = threading.Lock()
-_scan_state: dict = {"status": "idle", "progress": 0, "total": 0, "results": [], "universe": None, "mode": "swing", "error": None}
+_scan_state: dict = {
+    "status": "idle",
+    "progress": 0,
+    "total": 0,
+    "results": [],
+    "universe": None,
+    "mode": "quick",
+    "error": None,
+    "scan_diagnostics": None,
+}
 
 
-def _run_scan(universe: str, capital: float, mode: str) -> None:
+def _run_scan(universe: str, capital: float) -> None:
     global _scan_state
     try:
         symbols = get_universe(universe)
@@ -40,23 +47,18 @@ def _run_scan(universe: str, capital: float, mode: str) -> None:
             _scan_state.update(progress=done, total=total)
 
         data = get_histories(symbols, progress_cb=cb)
-
-        if mode == "quick":
-            nifty = get_history(NIFTY_INDEX_TICKER)
-            signals = scan_quick(data, capital=capital, nifty_df=nifty)
-            watch = quick_watchlist(data, capital=capital, nifty_df=nifty)
-            results = [asdict(s) for s in signals] + [asdict(s) for s in watch]
-        else:
-            nifty = get_history(NIFTY_INDEX_TICKER)
-            nifty_roc = nifty_roc63_from(nifty)
-            results = []
-            for sym, df in data.items():
-                sig = evaluate(sym, df, nifty_roc63=nifty_roc, capital=capital)
-                if sig is not None:
-                    results.append(asdict(sig))
-            results.sort(key=lambda s: s["score"], reverse=True)
-        _scan_state.update(status="done", results=results, progress=len(symbols))
-    except Exception as exc:  # surface scan failures to the UI
+        nifty = get_history(NIFTY_INDEX_TICKER)
+        quick_signals, diagnostics = run_quick_scan(
+            data, capital=capital, nifty_df=nifty, qualified_only=True
+        )
+        _scan_state.update(
+            status="done",
+            results=[asdict(s) for s in quick_signals],
+            progress=len(symbols),
+            scan_diagnostics=diagnostics,
+            mode="quick",
+        )
+    except Exception as exc:
         _scan_state.update(status="error", error=str(exc))
 
 
@@ -67,29 +69,24 @@ def index():
 
 @app.get("/api/universes")
 def universes():
-    return {"universes": list(INDEX_CSV_URLS)}
+    return {"universes": list(INDEX_CSV_URLS), "default_capital": DEFAULT_CAPITAL}
 
 
 @app.post("/api/scan")
 def start_scan(
     universe: str = "nifty500",
     capital: float = DEFAULT_CAPITAL,
-    mode: str = "swing",
     sync: bool = False,
 ):
     if universe not in INDEX_CSV_URLS:
         raise HTTPException(400, f"unknown universe {universe!r}")
-    if mode not in ("swing", "quick"):
-        raise HTTPException(400, f"unknown mode {mode!r}")
 
-    # Serverless (Vercel) can't share memory between the start request and a
-    # separate status poll, so run the whole scan inline and return results.
     if sync:
         _scan_state.update(
             status="running", progress=0, total=0, results=[],
-            universe=universe, mode=mode, error=None,
+            universe=universe, mode="quick", error=None, scan_diagnostics=None,
         )
-        _run_scan(universe, capital, mode)
+        _run_scan(universe, capital)
         return _scan_state
 
     with _scan_lock:
@@ -97,9 +94,9 @@ def start_scan(
             return {"status": "already-running"}
         _scan_state.update(
             status="running", progress=0, total=0, results=[],
-            universe=universe, mode=mode, error=None,
+            universe=universe, mode="quick", error=None, scan_diagnostics=None,
         )
-        threading.Thread(target=_run_scan, args=(universe, capital, mode), daemon=True).start()
+        threading.Thread(target=_run_scan, args=(universe, capital), daemon=True).start()
     return {"status": "started"}
 
 
@@ -116,12 +113,11 @@ def stock_detail(symbol: str, capital: float = DEFAULT_CAPITAL):
         raise HTTPException(404, f"no data for {symbol}")
 
     nifty = get_history(NIFTY_INDEX_TICKER)
-    sig = evaluate(symbol, df, nifty_roc63=nifty_roc63_from(nifty), capital=capital)
-    bt = run_backtest(symbol, df, nifty_df=nifty)
+    sig = evaluate_quick(symbol, df, capital=capital, nifty_df=nifty)
 
     from .indicators import enrich
 
-    e = enrich(df).iloc[-260:]
+    e = enrich(df).iloc[-120:]
     candles = [
         {
             "time": str(idx.date()),
@@ -139,7 +135,6 @@ def stock_detail(symbol: str, capital: float = DEFAULT_CAPITAL):
     return {
         "symbol": symbol,
         "signal": asdict(sig) if sig else None,
-        "backtest": asdict(bt) if bt else None,
         "candles": candles,
     }
 
@@ -147,12 +142,13 @@ def stock_detail(symbol: str, capital: float = DEFAULT_CAPITAL):
 class PaperBuyRequest(BaseModel):
     symbol: str
     qty: int
-    strategy: str = "swing"
+    strategy: str = "quick"
     price: float | None = None
     stop_loss: float | None = None
     target1: float | None = None
     target2: float | None = None
     notes: str = ""
+    tier: str | None = "qualified"
 
 
 @app.get("/api/paper/portfolio")
@@ -166,12 +162,13 @@ def paper_buy_endpoint(body: PaperBuyRequest):
         trade = paper_buy(
             symbol=body.symbol,
             qty=body.qty,
-            strategy=body.strategy,
+            strategy="quick",
             price=body.price,
             stop_loss=body.stop_loss,
             target1=body.target1,
             target2=body.target2,
             notes=body.notes,
+            tier=body.tier or "qualified",
         )
         return {"trade": asdict(trade), "portfolio": portfolio_view(refresh_prices=True)}
     except ValueError as exc:
@@ -191,6 +188,15 @@ def paper_sell_endpoint(trade_id: str, price: float | None = None):
 def paper_reset(starting_capital: float = DEFAULT_CAPITAL):
     pf = reset_portfolio(starting_capital)
     return {"portfolio": portfolio_view(), "message": f"Reset to ₹{starting_capital:,.0f}"}
+
+
+@app.post("/api/paper/check-exits")
+def paper_check_exits():
+    closed = check_exits()
+    return {
+        "closed": [asdict(t) for t in closed],
+        "portfolio": portfolio_view(refresh_prices=True),
+    }
 
 
 def main() -> None:
