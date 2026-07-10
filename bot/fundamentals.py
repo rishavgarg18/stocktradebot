@@ -24,13 +24,21 @@ CACHE_TTL_SECONDS = 7 * 24 * 3600
 
 FIELDS = [
     "sector",
+    "industry",
     "marketCap",
     "returnOnEquity",
     "profitMargins",
+    "operatingMargins",
     "revenueGrowth",
     "earningsGrowth",
     "debtToEquity",
     "trailingPE",
+    "forwardPE",
+    "priceToBook",
+    "bookValue",
+    "fiftyTwoWeekHigh",
+    "fiftyTwoWeekLow",
+    "freeCashflow",
 ]
 
 

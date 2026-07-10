@@ -16,13 +16,15 @@ from pydantic import BaseModel
 
 from .data import get_histories, get_history
 from .meanrev import DEFAULT_CAPITAL, evaluate_quick, run_quick_scan
+from .multibagger import evaluate_multibagger, scan_multibagger
 from .paper import buy as paper_buy
 from .paper import check_exits, portfolio_view, reset_portfolio, sell as paper_sell
-from .universe import INDEX_CSV_URLS, NIFTY_INDEX_TICKER, get_universe
+from .universe import INDEX_CSV_URLS, NIFTY_INDEX_TICKER, get_multibagger_universe, get_universe
+from .watchlist import add_to_watchlist, list_watchlist, refresh_scores, remove_from_watchlist
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
-app = FastAPI(title="NSE Quick Dip Bot")
+app = FastAPI(title="NSE Trading Bot")
 
 _scan_lock = threading.Lock()
 _scan_state: dict = {
@@ -37,26 +39,39 @@ _scan_state: dict = {
 }
 
 
-def _run_scan(universe: str, capital: float) -> None:
+def _run_scan(universe: str, capital: float, mode: str) -> None:
     global _scan_state
     try:
-        symbols = get_universe(universe)
-        _scan_state.update(total=len(symbols), progress=0)
+        if mode == "multibagger":
+            symbols = get_multibagger_universe()
+            universe_label = "nifty500+microcap250"
+        else:
+            symbols = get_universe(universe)
+            universe_label = universe
+
+        _scan_state.update(total=len(symbols), progress=0, universe=universe_label)
 
         def cb(done: int, total: int) -> None:
             _scan_state.update(progress=done, total=total)
 
         data = get_histories(symbols, progress_cb=cb)
-        nifty = get_history(NIFTY_INDEX_TICKER)
-        quick_signals, diagnostics = run_quick_scan(
-            data, capital=capital, nifty_df=nifty, qualified_only=True
-        )
+
+        if mode == "multibagger":
+            signals, diagnostics = scan_multibagger(data, qualified_only=False)
+            results = [asdict(s) for s in signals]
+        else:
+            nifty = get_history(NIFTY_INDEX_TICKER)
+            quick_signals, diagnostics = run_quick_scan(
+                data, capital=capital, nifty_df=nifty, qualified_only=True
+            )
+            results = [asdict(s) for s in quick_signals]
+
         _scan_state.update(
             status="done",
-            results=[asdict(s) for s in quick_signals],
+            results=results,
             progress=len(symbols),
             scan_diagnostics=diagnostics,
-            mode="quick",
+            mode=mode,
         )
     except Exception as exc:
         _scan_state.update(status="error", error=str(exc))
@@ -69,24 +84,31 @@ def index():
 
 @app.get("/api/universes")
 def universes():
-    return {"universes": list(INDEX_CSV_URLS), "default_capital": DEFAULT_CAPITAL}
+    return {
+        "universes": list(INDEX_CSV_URLS),
+        "default_capital": DEFAULT_CAPITAL,
+        "modes": ["quick", "multibagger"],
+    }
 
 
 @app.post("/api/scan")
 def start_scan(
     universe: str = "nifty500",
     capital: float = DEFAULT_CAPITAL,
+    mode: str = "quick",
     sync: bool = False,
 ):
-    if universe not in INDEX_CSV_URLS:
+    if mode not in ("quick", "multibagger"):
+        raise HTTPException(400, f"unknown mode {mode!r}")
+    if mode == "quick" and universe not in INDEX_CSV_URLS:
         raise HTTPException(400, f"unknown universe {universe!r}")
 
     if sync:
         _scan_state.update(
             status="running", progress=0, total=0, results=[],
-            universe=universe, mode="quick", error=None, scan_diagnostics=None,
+            universe=universe, mode=mode, error=None, scan_diagnostics=None,
         )
-        _run_scan(universe, capital)
+        _run_scan(universe, capital, mode)
         return _scan_state
 
     with _scan_lock:
@@ -94,9 +116,11 @@ def start_scan(
             return {"status": "already-running"}
         _scan_state.update(
             status="running", progress=0, total=0, results=[],
-            universe=universe, mode="quick", error=None, scan_diagnostics=None,
+            universe=universe, mode=mode, error=None, scan_diagnostics=None,
         )
-        threading.Thread(target=_run_scan, args=(universe, capital), daemon=True).start()
+        threading.Thread(
+            target=_run_scan, args=(universe, capital, mode), daemon=True
+        ).start()
     return {"status": "started"}
 
 
@@ -106,14 +130,11 @@ def scan_status():
 
 
 @app.get("/api/stock/{symbol}")
-def stock_detail(symbol: str, capital: float = DEFAULT_CAPITAL):
+def stock_detail(symbol: str, capital: float = DEFAULT_CAPITAL, mode: str = "quick"):
     symbol = symbol.upper()
     df = get_history(symbol)
     if df is None:
         raise HTTPException(404, f"no data for {symbol}")
-
-    nifty = get_history(NIFTY_INDEX_TICKER)
-    sig = evaluate_quick(symbol, df, capital=capital, nifty_df=nifty)
 
     from .indicators import enrich
 
@@ -132,10 +153,22 @@ def stock_detail(symbol: str, capital: float = DEFAULT_CAPITAL):
         for idx, r in e.iterrows()
     ]
 
+    if mode == "multibagger":
+        sig = evaluate_multibagger(symbol, df)
+        return {
+            "symbol": symbol,
+            "signal": asdict(sig) if sig else None,
+            "candles": candles,
+            "mode": "multibagger",
+        }
+
+    nifty = get_history(NIFTY_INDEX_TICKER)
+    sig = evaluate_quick(symbol, df, capital=capital, nifty_df=nifty)
     return {
         "symbol": symbol,
         "signal": asdict(sig) if sig else None,
         "candles": candles,
+        "mode": "quick",
     }
 
 
@@ -149,6 +182,20 @@ class PaperBuyRequest(BaseModel):
     target2: float | None = None
     notes: str = ""
     tier: str | None = "qualified"
+
+
+class WatchlistAddRequest(BaseModel):
+    symbol: str
+    entry_price: float | None = None
+    score: float | None = None
+    tier: str | None = None
+    sector: str = ""
+    industry: str = ""
+    market_cap_cr: float | None = None
+    roe_pct: float | None = None
+    revenue_growth_pct: float | None = None
+    reasons: list[str] = []
+    notes: str = ""
 
 
 @app.get("/api/paper/portfolio")
@@ -197,6 +244,44 @@ def paper_check_exits():
         "closed": [asdict(t) for t in closed],
         "portfolio": portfolio_view(refresh_prices=True),
     }
+
+
+@app.get("/api/watchlist")
+def watchlist_get(refresh: bool = False):
+    return list_watchlist(refresh_prices=refresh)
+
+
+@app.post("/api/watchlist/add")
+def watchlist_add(body: WatchlistAddRequest):
+    try:
+        item = add_to_watchlist(
+            symbol=body.symbol,
+            entry_price=body.entry_price,
+            score=body.score,
+            tier=body.tier,
+            sector=body.sector,
+            industry=body.industry,
+            market_cap_cr=body.market_cap_cr,
+            roe_pct=body.roe_pct,
+            revenue_growth_pct=body.revenue_growth_pct,
+            reasons=body.reasons,
+            notes=body.notes,
+        )
+        return {"item": asdict(item), "watchlist": list_watchlist(refresh_prices=True)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.delete("/api/watchlist/{symbol}")
+def watchlist_remove(symbol: str):
+    if not remove_from_watchlist(symbol):
+        raise HTTPException(404, f"{symbol.upper()} not on watchlist")
+    return {"watchlist": list_watchlist(refresh_prices=True)}
+
+
+@app.post("/api/watchlist/refresh")
+def watchlist_refresh():
+    return refresh_scores()
 
 
 def main() -> None:

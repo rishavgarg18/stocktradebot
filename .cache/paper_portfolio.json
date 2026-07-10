@@ -1,5 +1,40 @@
 {
   "starting_capital": 20000,
-  "cash": 20000,
-  "trades": []
+  "cash": 14292.0,
+  "trades": [
+    {
+      "id": "570c4532",
+      "symbol": "KPIL",
+      "qty": 2,
+      "entry_price": 1332.4,
+      "entry_date": "2026-07-08",
+      "strategy": "quick",
+      "stop_loss": 1250.15,
+      "target1": null,
+      "target2": null,
+      "status": "open",
+      "exit_price": null,
+      "exit_date": null,
+      "pnl": null,
+      "pnl_pct": null,
+      "notes": "tier qualified | hist win 68.8%"
+    },
+    {
+      "id": "9e37c83a",
+      "symbol": "SHRIRAMFIN",
+      "qty": 3,
+      "entry_price": 1014.4,
+      "entry_date": "2026-07-08",
+      "strategy": "quick",
+      "stop_loss": 959.84,
+      "target1": null,
+      "target2": null,
+      "status": "open",
+      "exit_price": null,
+      "exit_date": null,
+      "pnl": null,
+      "pnl_pct": null,
+      "notes": "tier qualified | hist win 65%"
+    }
+  ]
 }

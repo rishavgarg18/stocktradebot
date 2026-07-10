@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="theme-color" content="#0b0f17" />
-<title>Quick Dip Bot</title>
+<title>Stock Bot</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
@@ -13,50 +13,63 @@
   .card { background:#111827; border:1px solid #1f2937; border-radius:1rem; }
   .tap { -webkit-tap-highlight-color:transparent; }
   .signal-card:active { transform:scale(0.99); }
+  .mode-tab.active { background:#1f2937; color:#fff; border-color:#374151; }
+  .mode-tab { border:1px solid transparent; }
 </style>
 </head>
 <body class="min-h-screen tap">
 <div class="max-w-lg mx-auto px-4 pt-4 pb-8 sm:max-w-2xl lg:max-w-4xl">
 
+  <!-- Mode switch -->
+  <div class="flex gap-2 mb-4">
+    <button id="tabQuick" onclick="setMode('quick')" class="mode-tab active flex-1 rounded-xl py-2.5 text-sm font-semibold text-slate-400">Quick Dip</button>
+    <button id="tabMulti" onclick="setMode('multibagger')" class="mode-tab flex-1 rounded-xl py-2.5 text-sm font-semibold text-slate-400">Multibagger</button>
+  </div>
+
   <!-- Header -->
-  <header class="mb-5">
-    <p class="text-[11px] font-semibold uppercase tracking-widest text-emerald-500 mb-1">Wait · Then buy qualified only</p>
-    <h1 class="text-2xl font-bold tracking-tight">Quick Dip Bot</h1>
-    <p class="text-sm text-slate-400 mt-1">2-day RSI dip-buy · 1% risk · ₹20,000 capital</p>
+  <header class="mb-4" id="headerQuick">
+    <p class="text-[11px] font-semibold uppercase tracking-widest text-emerald-500 mb-1">Wait · Buy qualified only</p>
+    <h1 class="text-2xl font-bold">Quick Dip Bot</h1>
+    <p class="text-sm text-slate-400 mt-1">2-day RSI dip · ₹20,000 · 1% risk</p>
+  </header>
+  <header class="mb-4 hidden" id="headerMulti">
+    <p class="text-[11px] font-semibold uppercase tracking-widest text-violet-400 mb-1">Sub-₹50 · Strong fundamentals · Growth sectors</p>
+    <h1 class="text-2xl font-bold">Multibagger Hunt</h1>
+    <p class="text-sm text-slate-400 mt-1">Research screener — not a buy signal. Deep-dive before investing.</p>
   </header>
 
   <!-- Controls -->
   <div class="card p-4 mb-4 space-y-3">
-    <div class="grid grid-cols-2 gap-3">
+    <div id="quickControls" class="grid grid-cols-2 gap-3">
       <div>
-        <label class="text-[10px] text-slate-500 uppercase tracking-wide">Universe</label>
+        <label class="text-[10px] text-slate-500 uppercase">Universe</label>
         <select id="universe" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm">
-          <option value="nifty50">Nifty 50</option>
-          <option value="nifty100">Nifty 100</option>
-          <option value="nifty200">Nifty 200</option>
           <option value="nifty500" selected>Nifty 500</option>
+          <option value="nifty200">Nifty 200</option>
+          <option value="nifty100">Nifty 100</option>
         </select>
       </div>
       <div>
-        <label class="text-[10px] text-slate-500 uppercase tracking-wide">Capital</label>
-        <div class="mt-1 w-full bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-300">₹20,000</div>
-        <input type="hidden" id="capital" value="20000" />
+        <label class="text-[10px] text-slate-500 uppercase">Capital</label>
+        <div class="mt-1 bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2.5 text-sm">₹20,000</div>
       </div>
     </div>
-    <button id="scanBtn" onclick="startScan()"
-      class="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition rounded-xl py-3.5 text-sm font-bold">
+    <div id="multiControls" class="hidden text-xs text-slate-500 bg-slate-800/40 rounded-xl p-3">
+      Scans <b class="text-slate-300">Nifty 500 + Microcap 250</b> (~750 stocks) for price &lt; ₹50 with strong fundamentals &amp; growth themes.
+    </div>
+    <button id="scanBtn" onclick="startScan()" class="w-full bg-emerald-600 hover:bg-emerald-500 rounded-xl py-3.5 text-sm font-bold">
       Scan for qualified setups
     </button>
     <div id="progressWrap" class="hidden">
       <div class="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-        <div id="progressBar" class="h-full bg-emerald-500 transition-all animate-pulse" style="width:100%"></div>
+        <div class="h-full bg-emerald-500 animate-pulse" style="width:100%"></div>
       </div>
-      <p id="progressLabel" class="text-xs text-slate-500 mt-2 text-center">Scanning…</p>
+      <p class="text-xs text-slate-500 mt-2 text-center">Scanning… first run may take 2–3 min</p>
     </div>
   </div>
 
-  <!-- Portfolio -->
-  <section class="card p-4 mb-4">
+  <!-- Paper (quick only) -->
+  <section id="paperSection" class="card p-4 mb-4">
     <div class="flex items-center justify-between mb-3">
       <h2 class="text-sm font-semibold">Paper portfolio</h2>
       <div class="flex gap-2">
@@ -65,304 +78,370 @@
       </div>
     </div>
     <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      <div class="bg-slate-800/50 rounded-xl p-3">
-        <div class="text-[10px] text-slate-500">Equity</div>
-        <div id="pEquity" class="text-lg font-bold">—</div>
-      </div>
-      <div class="bg-slate-800/50 rounded-xl p-3">
-        <div class="text-[10px] text-slate-500">P&amp;L</div>
-        <div id="pTotal" class="text-lg font-bold">—</div>
-      </div>
-      <div class="bg-slate-800/50 rounded-xl p-3">
-        <div class="text-[10px] text-slate-500">Open</div>
-        <div id="pOpenCount" class="text-lg font-bold">0</div>
-      </div>
-      <div class="bg-slate-800/50 rounded-xl p-3">
-        <div class="text-[10px] text-slate-500">Win rate</div>
-        <div id="pWinRate" class="text-lg font-bold">—</div>
+      <div class="bg-slate-800/50 rounded-xl p-3"><div class="text-[10px] text-slate-500">Equity</div><div id="pEquity" class="text-lg font-bold">—</div></div>
+      <div class="bg-slate-800/50 rounded-xl p-3"><div class="text-[10px] text-slate-500">P&amp;L</div><div id="pTotal" class="text-lg font-bold">—</div></div>
+      <div class="bg-slate-800/50 rounded-xl p-3"><div class="text-[10px] text-slate-500">Open</div><div id="pOpenCount" class="text-lg font-bold">0</div></div>
+      <div class="bg-slate-800/50 rounded-xl p-3"><div class="text-[10px] text-slate-500">Win rate</div><div id="pWinRate" class="text-lg font-bold">—</div></div>
+    </div>
+    <div id="openPositions" class="mt-3 text-xs"></div>
+  </section>
+
+  <!-- Watchlist (multibagger only) -->
+  <section id="watchlistSection" class="hidden card p-4 mb-4 border-violet-900/30">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold">Saved watchlist <span id="wlCount" class="text-violet-400"></span></h2>
+      <div class="flex gap-2">
+        <button onclick="loadWatchlist(true)" class="text-xs text-sky-400 px-2 py-1 rounded-lg border border-slate-700">Refresh</button>
+        <button onclick="refreshWatchlistScores()" class="text-xs text-violet-400 px-2 py-1 rounded-lg border border-slate-700">Re-score</button>
       </div>
     </div>
-    <p id="ltpUpdated" class="text-[10px] text-slate-600 mt-2"></p>
-    <div id="openPositions" class="mt-3 text-xs"></div>
-    <details class="mt-3">
-      <summary class="text-xs text-slate-500 cursor-pointer">Closed trades</summary>
-      <div id="closedTrades" class="mt-2 text-xs max-h-48 overflow-auto"></div>
-    </details>
+    <div id="watchlistBody" class="space-y-2 text-xs"></div>
+    <p id="watchlistEmpty" class="text-xs text-slate-500 text-center py-3 hidden">No saved picks yet — tap ★ on a candidate to save.</p>
   </section>
 
   <!-- Diagnostics -->
-  <section id="diagSection" class="hidden card p-4 mb-4 border-emerald-900/30">
-    <h2 class="text-sm font-semibold text-emerald-400 mb-2">Today's funnel</h2>
+  <section id="diagSection" class="hidden card p-4 mb-4">
+    <h2 class="text-sm font-semibold mb-2" id="diagTitle">Scan funnel</h2>
     <div id="diagBody" class="text-xs text-slate-300 space-y-1.5"></div>
   </section>
 
-  <!-- Qualified signals -->
+  <!-- Results -->
   <section class="mb-4">
     <div class="flex items-center justify-between mb-3">
-      <h2 class="text-sm font-semibold">Qualified signals <span id="nQualified" class="text-emerald-400"></span></h2>
+      <h2 class="text-sm font-semibold"><span id="resultsTitle">Qualified signals</span> <span id="nCount" class="text-emerald-400"></span></h2>
       <span id="asOf" class="text-[10px] text-slate-500"></span>
     </div>
     <div id="signalList" class="space-y-3"></div>
     <div id="emptyState" class="card p-8 text-center hidden">
-      <div class="text-3xl mb-2">⏳</div>
-      <p class="text-sm font-medium text-slate-300">No qualified setups</p>
-      <p class="text-xs text-slate-500 mt-2 leading-relaxed">Zero signals is normal. Wait for a stock that passes every gate — do not trade near-misses.</p>
+      <p class="text-sm font-medium text-slate-300" id="emptyTitle">No results</p>
+      <p class="text-xs text-slate-500 mt-2 leading-relaxed" id="emptyMsg"></p>
     </div>
-    <div id="initialState" class="card p-8 text-center text-slate-500 text-sm">
-      Run a scan to check for qualified dip-buys.
-    </div>
+    <div id="initialState" class="card p-8 text-center text-slate-500 text-sm">Run a scan to see results.</div>
   </section>
 
   <!-- Detail drawer -->
   <div id="detailOverlay" class="fixed inset-0 bg-black/60 z-40 hidden" onclick="closeDetail()"></div>
-  <div id="detailPanel" class="fixed inset-x-0 bottom-0 z-50 bg-[#111827] border-t border-slate-700 rounded-t-2xl max-h-[85vh] overflow-y-auto transform translate-y-full transition-transform duration-300 p-4 pb-[calc(1rem+var(--safe-b))] max-w-lg mx-auto sm:max-w-2xl lg:max-w-4xl">
+  <div id="detailPanel" class="fixed inset-x-0 bottom-0 z-50 bg-[#111827] border-t border-slate-700 rounded-t-2xl max-h-[88vh] overflow-y-auto transform translate-y-full transition-transform duration-300 p-4 pb-[calc(1rem+var(--safe-b))] max-w-lg mx-auto sm:max-w-2xl">
     <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-    <div id="detailEmpty" class="text-slate-500 text-sm text-center py-8">Select a signal</div>
-    <div id="detailBody" class="hidden">
+    <div id="detailBody">
       <div class="flex items-start justify-between mb-3">
-        <div>
-          <span id="dSymbol" class="text-xl font-bold"></span>
-          <span class="ml-2 text-[10px] font-bold uppercase bg-emerald-900/50 text-emerald-400 px-2 py-0.5 rounded">qualified</span>
-        </div>
-        <button onclick="closeDetail()" class="text-slate-500 text-xl leading-none px-2">&times;</button>
+        <div><span id="dSymbol" class="text-xl font-bold"></span><span id="dBadge" class="ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded"></span></div>
+        <button onclick="closeDetail()" class="text-slate-500 text-xl px-2">&times;</button>
       </div>
-      <div class="flex gap-4 text-sm mb-3">
-        <div><span class="text-slate-500">Price</span><div id="dClose" class="font-semibold"></div></div>
-        <div><span class="text-slate-500">Stop</span><div id="dStop" class="font-semibold text-red-400"></div></div>
-        <div><span class="text-slate-500">Qty (1% risk)</span><div id="dQty" class="font-semibold"></div></div>
-      </div>
-      <div id="chart" class="w-full rounded-xl overflow-hidden border border-slate-800 mb-3" style="height:220px"></div>
+      <div id="dStats" class="grid grid-cols-3 gap-2 text-xs mb-3"></div>
+      <div id="chart" class="w-full rounded-xl border border-slate-800 mb-3" style="height:200px"></div>
       <div id="paperActions" class="mb-3"></div>
-      <div class="text-xs text-slate-400 font-semibold mb-1">Why this setup</div>
-      <ul id="reasons" class="text-xs text-slate-300 space-y-1 list-disc list-inside mb-3"></ul>
+      <div class="text-xs text-slate-400 font-semibold mb-1">Analysis</div>
+      <ul id="reasons" class="text-xs text-slate-300 space-y-1 list-disc list-inside mb-2"></ul>
       <ul id="warnings" class="text-xs text-amber-400/90 space-y-1 list-disc list-inside"></ul>
     </div>
   </div>
 
-  <p class="text-[10px] text-slate-600 text-center leading-relaxed px-2">
-    Educational tool only — not investment advice. Auto-exits on stop / day-2 per strategy rules.
-  </p>
+  <p class="text-[10px] text-slate-600 text-center leading-relaxed">Not investment advice. Multibagger scan is research only — most sub-₹50 stocks are traps.</p>
 </div>
 
 <script>
 const CAPITAL = 20000;
-let results = [], paper = null, detailSymbol = null, scanDiagnostics = null, chart = null;
+let scanMode = 'quick', results = [], paper = null, watchlist = null, watchlistSymbols = new Set();
+let detailSymbol = null, scanDiagnostics = null, chart = null;
 
 function fmt(n){ return n==null?'—':Number(n).toLocaleString('en-IN',{maximumFractionDigits:2}); }
-function fmtPnl(n){
-  if(n==null)return '—';
-  return (n>=0?'+':'')+Number(n).toLocaleString('en-IN',{maximumFractionDigits:2});
-}
+function fmtPnl(n){ if(n==null)return '—'; return (n>=0?'+':'')+Number(n).toLocaleString('en-IN',{maximumFractionDigits:2}); }
 function pnlClass(n){ return n==null?'text-slate-400':n>=0?'text-emerald-400':'text-red-400'; }
 
+function setMode(m){
+  scanMode = m;
+  document.getElementById('tabQuick').classList.toggle('active', m==='quick');
+  document.getElementById('tabMulti').classList.toggle('active', m==='multibagger');
+  document.getElementById('headerQuick').classList.toggle('hidden', m!=='quick');
+  document.getElementById('headerMulti').classList.toggle('hidden', m!=='multibagger');
+  document.getElementById('quickControls').classList.toggle('hidden', m!=='quick');
+  document.getElementById('multiControls').classList.toggle('hidden', m!=='multibagger');
+  document.getElementById('paperSection').classList.toggle('hidden', m!=='quick');
+  document.getElementById('watchlistSection').classList.toggle('hidden', m!=='multibagger');
+  document.getElementById('scanBtn').textContent = m==='quick' ? 'Scan for qualified setups' : 'Hunt multibaggers under ₹50';
+  document.getElementById('scanBtn').className = m==='quick'
+    ? 'w-full bg-emerald-600 hover:bg-emerald-500 rounded-xl py-3.5 text-sm font-bold'
+    : 'w-full bg-violet-600 hover:bg-violet-500 rounded-xl py-3.5 text-sm font-bold';
+  document.getElementById('resultsTitle').textContent = m==='quick' ? 'Qualified signals' : 'Multibagger candidates';
+  document.getElementById('diagTitle').textContent = m==='quick' ? "Today's funnel" : 'Screener funnel';
+  results = []; scanDiagnostics = null;
+  document.getElementById('signalList').innerHTML = '';
+  document.getElementById('diagSection').classList.add('hidden');
+  document.getElementById('emptyState').classList.add('hidden');
+  document.getElementById('initialState').classList.remove('hidden');
+  if(m==='multibagger') loadWatchlist();
+}
+
+async function loadWatchlist(refresh=false){
+  watchlist = await (await fetch(refresh?'/api/watchlist?refresh=true':'/api/watchlist')).json();
+  watchlistSymbols = new Set((watchlist.items||[]).map(i=>i.symbol));
+  renderWatchlist();
+  if(detailSymbol && scanMode==='multibagger') updateWatchlistActions(detailSymbol);
+  if(scanMode==='multibagger') renderSignals();
+}
+
+function renderWatchlist(){
+  const body = document.getElementById('watchlistBody');
+  const empty = document.getElementById('watchlistEmpty');
+  const items = watchlist?.items||[];
+  document.getElementById('wlCount').textContent = items.length?`(${items.length})`:'';
+  if(!items.length){ body.innerHTML=''; empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+  body.innerHTML = items.map(i=>`
+    <div class="flex items-center justify-between bg-slate-800/50 rounded-xl p-3">
+      <div class="min-w-0 flex-1" onclick="openWatchlistDetail('${i.symbol}')">
+        <div class="font-semibold">${i.symbol} <span class="text-violet-400">${i.score??'—'}</span></div>
+        <div class="text-slate-500 truncate">${i.industry||i.sector||'—'} · added ${i.added_at}</div>
+        <div class="text-slate-400 mt-0.5">₹${fmt(i.entry_price)} → ₹${fmt(i.current_price)} <span class="${pnlClass(i.pct_change)}">${i.pct_change!=null?(i.pct_change>=0?'+':'')+i.pct_change+'%':''}</span></div>
+      </div>
+      <button onclick="removeFromWatchlist('${i.symbol}',event)" class="text-slate-500 hover:text-red-400 px-2 text-lg" title="Remove">×</button>
+    </div>`).join('');
+}
+
+async function saveToWatchlist(symbol,ev){
+  if(ev) ev.stopPropagation();
+  const sig = results.find(r=>r.symbol===symbol);
+  const body = sig ? {
+    symbol, entry_price:sig.close, score:sig.score, tier:sig.tier,
+    sector:sig.sector, industry:sig.industry, market_cap_cr:sig.market_cap_cr,
+    roe_pct:sig.roe_pct, revenue_growth_pct:sig.revenue_growth_pct, reasons:sig.reasons||[],
+  } : { symbol };
+  const r = await fetch('/api/watchlist/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d = await r.json();
+  if(!r.ok){ alert(d.detail||'Could not save'); return; }
+  watchlist = d.watchlist;
+  watchlistSymbols.add(symbol);
+  renderWatchlist();
+  renderSignals();
+  if(detailSymbol===symbol) updateWatchlistActions(symbol);
+}
+
+async function removeFromWatchlist(symbol,ev){
+  if(ev) ev.stopPropagation();
+  await fetch(`/api/watchlist/${symbol}`,{method:'DELETE'});
+  watchlistSymbols.delete(symbol);
+  await loadWatchlist();
+}
+
+async function refreshWatchlistScores(){
+  const r = await fetch('/api/watchlist/refresh',{method:'POST'});
+  watchlist = (await r.json()).watchlist;
+  watchlistSymbols = new Set((watchlist.items||[]).map(i=>i.symbol));
+  renderWatchlist();
+}
+
+function openWatchlistDetail(symbol){
+  const item = watchlist?.items?.find(i=>i.symbol===symbol);
+  if(!item) return;
+  detailSymbol = symbol;
+  document.getElementById('dSymbol').textContent = symbol;
+  document.getElementById('dBadge').textContent = item.tier||'saved';
+  document.getElementById('dBadge').className = 'ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-violet-900/50 text-violet-400';
+  document.getElementById('dStats').innerHTML = `
+    <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Score</div><div class="font-semibold">${item.score??'—'}</div></div>
+    <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Price</div><div class="font-semibold">₹${fmt(item.current_price||item.entry_price)}</div></div>
+    <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Since add</div><div class="font-semibold ${pnlClass(item.pct_change)}">${item.pct_change!=null?(item.pct_change>=0?'+':'')+item.pct_change+'%':'—'}</div></div>`;
+  updateWatchlistActions(symbol);
+  document.getElementById('reasons').innerHTML = (item.reasons||[]).map(r=>`<li>${r}</li>`).join('');
+  document.getElementById('warnings').innerHTML = '';
+  document.getElementById('detailOverlay').classList.remove('hidden');
+  document.getElementById('detailPanel').classList.remove('translate-y-full');
+  fetch(`/api/stock/${symbol}?mode=multibagger`).then(r=>r.json()).then(d=>{
+    if(d.candles?.length) drawChart(d.candles, null);
+  });
+}
+
+function updateWatchlistActions(symbol){
+  const el = document.getElementById('paperActions');
+  if(watchlistSymbols.has(symbol)){
+    el.innerHTML = `<button onclick="removeFromWatchlist('${symbol}')" class="w-full bg-slate-700 rounded-xl py-3 text-sm font-semibold text-slate-300">Remove from watchlist</button>`;
+  } else {
+    el.innerHTML = `<button onclick="saveToWatchlist('${symbol}')" class="w-full bg-violet-600 rounded-xl py-3 text-sm font-semibold">★ Save to watchlist</button>`;
+  }
+}
+
 async function loadPaper(refresh=false){
-  const url = refresh?'/api/paper/portfolio?refresh=true':'/api/paper/portfolio';
-  paper = await (await fetch(url)).json();
+  if(scanMode!=='quick') return;
+  paper = await (await fetch(refresh?'/api/paper/portfolio?refresh=true':'/api/paper/portfolio')).json();
   document.getElementById('pEquity').textContent = '₹'+fmt(paper.equity);
-  const total = document.getElementById('pTotal');
-  total.className = 'text-lg font-bold '+pnlClass(paper.total_pnl);
-  total.textContent = fmtPnl(paper.total_pnl);
+  const t = document.getElementById('pTotal');
+  t.className = 'text-lg font-bold '+pnlClass(paper.total_pnl);
+  t.textContent = fmtPnl(paper.total_pnl);
   document.getElementById('pOpenCount').textContent = paper.open_count;
   document.getElementById('pWinRate').textContent = paper.win_rate!=null?paper.win_rate+'%':'—';
-  const ltp = document.getElementById('ltpUpdated');
-  if(paper.ltp_updated_at){
-    ltp.textContent = (paper.ltp_live?'Live · ':'Cached · ')+paper.ltp_updated_at
-      +(paper.durable===false?' · ⚠ not persisted':'');
-    ltp.className = 'text-[10px] '+(paper.durable===false?'text-amber-500':'text-slate-600')+' mt-2';
-  }
-  const openEl = document.getElementById('openPositions');
-  if(!paper.open_positions.length){
-    openEl.innerHTML = '';
-  } else {
-    openEl.innerHTML = paper.open_positions.map(p=>`
-      <div class="flex items-center justify-between bg-slate-800/50 rounded-xl p-3 mb-2">
-        <div>
-          <div class="font-semibold">${p.symbol} × ${p.qty}</div>
-          <div class="text-slate-500">₹${fmt(p.entry_price)} → ₹${fmt(p.current_price)}</div>
-        </div>
-        <div class="text-right">
-          <div class="${pnlClass(p.unrealized_pnl)} font-semibold">${fmtPnl(p.unrealized_pnl)}</div>
-          <button onclick="paperSell('${p.id}')" class="text-[11px] text-red-400 mt-1">Sell</button>
-        </div>
-      </div>`).join('');
-  }
-  const closedEl = document.getElementById('closedTrades');
-  closedEl.innerHTML = paper.closed_trades.length
-    ? paper.closed_trades.map(t=>`<div class="flex justify-between py-1.5 border-t border-slate-800/60">
-        <span>${t.symbol}</span>
-        <span class="${pnlClass(t.pnl)}">${fmtPnl(t.pnl)} (${fmtPnl(t.pnl_pct)}%)</span></div>`).join('')
-    : '<div class="text-slate-600">None yet</div>';
-  if(detailSymbol) updatePaperActions(detailSymbol);
+  const op = document.getElementById('openPositions');
+  op.innerHTML = paper.open_positions.length ? paper.open_positions.map(p=>`
+    <div class="flex justify-between bg-slate-800/50 rounded-xl p-3 mb-2">
+      <div><div class="font-semibold">${p.symbol} × ${p.qty}</div><div class="text-slate-500">₹${fmt(p.entry_price)}</div></div>
+      <div class="text-right"><div class="${pnlClass(p.unrealized_pnl)}">${fmtPnl(p.unrealized_pnl)}</div>
+      <button onclick="paperSell('${p.id}')" class="text-[11px] text-red-400">Sell</button></div>
+    </div>`).join('') : '';
 }
 
 async function startScan(){
   const btn = document.getElementById('scanBtn');
   btn.disabled = true;
-  btn.textContent = 'Scanning…';
   document.getElementById('progressWrap').classList.remove('hidden');
   document.getElementById('initialState').classList.add('hidden');
   try {
     const u = document.getElementById('universe').value;
-    const res = await fetch(`/api/scan?universe=${u}&capital=${CAPITAL}&sync=true`,{method:'POST'});
-    const raw = await res.text();
-    let s;
-    try{s=JSON.parse(raw);}catch{
-      throw new Error(res.status===504?'Scan timed out — try Nifty 50 or 100.':'Server error '+res.status);
-    }
+    const url = scanMode==='quick'
+      ? `/api/scan?universe=${u}&capital=${CAPITAL}&mode=quick&sync=true`
+      : `/api/scan?capital=${CAPITAL}&mode=multibagger&sync=true`;
+    const res = await fetch(url,{method:'POST'});
+    const s = JSON.parse(await res.text());
     if(!res.ok||s.status==='error') throw new Error(s.error||'Scan failed');
     results = s.results||[];
     scanDiagnostics = s.scan_diagnostics;
     renderDiagnostics();
     renderSignals();
-  } catch(e){
-    alert(e.message||e);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Scan for qualified setups';
-    document.getElementById('progressWrap').classList.add('hidden');
-  }
+  } catch(e){ alert(e.message||e); }
+  finally { btn.disabled=false; document.getElementById('progressWrap').classList.add('hidden'); }
 }
 
 function renderDiagnostics(){
-  const sec = document.getElementById('diagSection');
-  const body = document.getElementById('diagBody');
+  const sec = document.getElementById('diagSection'), body = document.getElementById('diagBody');
   if(!scanDiagnostics){ sec.classList.add('hidden'); return; }
   sec.classList.remove('hidden');
+  sec.className = 'card p-4 mb-4 ' + (scanMode==='quick'?'border-emerald-900/30':'border-violet-900/30');
   const d = scanDiagnostics;
-  if(!d.regime_ok){
-    body.innerHTML = `<p class="text-amber-300">${d.regime_note}</p><p class="text-slate-500">Market regime blocks all dip-buys. Wait.</p>`;
-    return;
+  if(scanMode==='quick'){
+    if(!d.regime_ok){ body.innerHTML=`<p class="text-amber-300">${d.regime_note}</p>`; return; }
+    body.innerHTML = [
+      `<p>${d.regime_note}</p>`,
+      `<p><b>${d.dip_setups_today}</b> dips → <b>${d.passed_stats}</b> passed gates → <b>${d.qualified}</b> qualified</p>`,
+      !d.qualified?`<p class="text-amber-300">No qualified today — waiting is the strategy.</p>`:'',
+      d.top_filter_reasons?.length?`<p class="text-slate-500">${d.top_filter_reasons.slice(0,4).join(' · ')}</p>`:'',
+    ].filter(Boolean).map(x=>`<div>${x}</div>`).join('');
+  } else {
+    body.innerHTML = [
+      `<p>Scanned <b>${d.symbols_scanned}</b> stocks across Nifty 500 + Microcap 250</p>`,
+      `<p><b>${d.sub50_price_pass}</b> under ₹50 → <b>${d.scored}</b> passed quality filters → <b>${d.qualified}</b> qualified, <b>${d.watch||0}</b> watch</p>`,
+      !d.returned?`<p class="text-amber-300">No multibagger candidates today. Most sub-₹50 stocks are traps (PSU banks, loss-makers).</p>`:'',
+      `<p class="text-slate-500">Min market cap ₹${d.min_market_cap_cr} Cr · min ₹1 Cr/day turnover · must be profitable &amp; growing</p>`,
+    ].filter(Boolean).map(x=>`<div>${x}</div>`).join('');
   }
-  body.innerHTML = [
-    `<p>${d.regime_note}</p>`,
-    `<p><b>${d.dip_setups_today}</b> dips found → <b>${d.passed_stats}</b> passed history gates → <b>${d.qualified}</b> qualified</p>`,
-    d.qualified===0?`<p class="text-amber-300/90 font-medium">No qualified signals today. Waiting is the strategy.</p>`:'',
-    d.top_filter_reasons?.length?`<p class="text-slate-500">Blockers: ${d.top_filter_reasons.slice(0,4).join(' · ')}</p>`:'',
-    (d.extended||d.review)?`<p class="text-slate-600">${(d.extended||0)+(d.review||0)} near-misses hidden — not shown on purpose.</p>`:'',
-  ].filter(Boolean).map(x=>`<div>${x}</div>`).join('');
 }
 
 function renderSignals(){
-  const list = document.getElementById('signalList');
-  const empty = document.getElementById('emptyState');
-  document.getElementById('nQualified').textContent = results.length?`(${results.length})`:'';
+  const list = document.getElementById('signalList'), empty = document.getElementById('emptyState');
+  document.getElementById('nCount').textContent = results.length?`(${results.length})`:'';
+  document.getElementById('nCount').className = scanMode==='quick'?'text-emerald-400':'text-violet-400';
   document.getElementById('asOf').textContent = results[0]?.as_of||'';
   if(!results.length){
-    list.innerHTML = '';
+    list.innerHTML='';
     empty.classList.remove('hidden');
+    document.getElementById('emptyTitle').textContent = scanMode==='quick'?'No qualified setups':'No multibagger candidates';
+    document.getElementById('emptyMsg').textContent = scanMode==='quick'
+      ? 'Zero signals is normal. Wait for full gate pass — do not force trades.'
+      : 'Most sub-₹50 stocks fail quality filters (IDEA, YESBANK, UCOBANK etc.). That is by design.';
     return;
   }
   empty.classList.add('hidden');
-  list.innerHTML = results.map(r=>`
-    <article class="signal-card card p-4 cursor-pointer" onclick="openDetail('${r.symbol}')">
-      <div class="flex items-center justify-between mb-2">
-        <span class="text-lg font-bold">${r.symbol}</span>
-        <span class="text-xs font-semibold text-emerald-400">${r.hist_win_rate}% win</span>
-      </div>
-      <div class="grid grid-cols-3 gap-2 text-xs mb-3">
-        <div><span class="text-slate-500">Price</span><div class="font-medium">₹${fmt(r.close)}</div></div>
-        <div><span class="text-slate-500">Stop</span><div class="font-medium text-red-300">₹${fmt(r.stop_loss)}</div></div>
-        <div><span class="text-slate-500">Qty</span><div class="font-medium">${r.qty_for_1pct_risk}</div></div>
-      </div>
-      <div class="flex gap-3 text-[11px] text-slate-500">
-        <span>${r.hist_trades} trades</span>
-        <span>PF ${fmt(r.hist_profit_factor)}</span>
-        <span>Avg ${fmt(r.hist_avg_pnl_pct)}%</span>
-      </div>
-      <button onclick="paperBuyFromSignal('${r.symbol}', event)"
-        class="mt-3 w-full bg-emerald-600 hover:bg-emerald-500 rounded-xl py-2.5 text-sm font-semibold">
-        Paper buy ${r.qty_for_1pct_risk} shares
-      </button>
-    </article>`).join('');
+  if(scanMode==='quick') list.innerHTML = results.map(quickCard).join('');
+  else list.innerHTML = results.map(multiCard).join('');
 }
 
-async function paperBuyFromSignal(symbol, ev){
+function quickCard(r){
+  return `<article class="signal-card card p-4" onclick="openDetail('${r.symbol}')">
+    <div class="flex justify-between mb-2"><span class="text-lg font-bold">${r.symbol}</span><span class="text-xs text-emerald-400 font-semibold">${r.hist_win_rate}% win</span></div>
+    <div class="grid grid-cols-3 gap-2 text-xs mb-2">
+      <div><span class="text-slate-500">Price</span><div>₹${fmt(r.close)}</div></div>
+      <div><span class="text-slate-500">Stop</span><div class="text-red-300">₹${fmt(r.stop_loss)}</div></div>
+      <div><span class="text-slate-500">Qty</span><div>${r.qty_for_1pct_risk}</div></div>
+    </div>
+    <button onclick="paperBuy('${r.symbol}',event)" class="w-full bg-emerald-600 rounded-xl py-2.5 text-sm font-semibold">Paper buy ${r.qty_for_1pct_risk} shares</button>
+  </article>`;
+}
+
+function multiCard(r){
+  const tierColor = r.tier==='qualified'?'text-violet-400':'text-amber-400';
+  const saved = watchlistSymbols.has(r.symbol);
+  return `<article class="signal-card card p-4 border-violet-900/20" onclick="openDetail('${r.symbol}')">
+    <div class="flex justify-between mb-1">
+      <span class="text-lg font-bold">${r.symbol}</span>
+      <div class="flex items-center gap-2">
+        <span class="text-sm font-bold ${tierColor}">${r.score}/100</span>
+        <button onclick="saveToWatchlist('${r.symbol}',event)" class="text-lg leading-none ${saved?'text-violet-400':'text-slate-600'}" title="${saved?'Saved':'Save'}">${saved?'★':'☆'}</button>
+      </div>
+    </div>
+    <div class="text-[11px] text-slate-500 mb-2">${r.industry||r.sector} · ₹${fmt(r.close)} · ${r.market_cap_cr||'?'} Cr mcap</div>
+    <div class="flex flex-wrap gap-2 text-[10px] mb-2">
+      ${r.roe_pct!=null?`<span class="bg-slate-800 px-2 py-0.5 rounded">ROE ${r.roe_pct}%</span>`:''}
+      ${r.revenue_growth_pct!=null?`<span class="bg-slate-800 px-2 py-0.5 rounded">Rev +${r.revenue_growth_pct}%</span>`:''}
+      ${r.profit_margin_pct!=null?`<span class="bg-slate-800 px-2 py-0.5 rounded">Margin ${r.profit_margin_pct}%</span>`:''}
+      ${r.roc_6m_pct!=null?`<span class="bg-slate-800 px-2 py-0.5 rounded">6M ${r.roc_6m_pct>0?'+':''}${r.roc_6m_pct}%</span>`:''}
+    </div>
+    <p class="text-[11px] text-slate-400 line-clamp-2">${(r.reasons||[]).slice(0,2).join(' · ')}</p>
+    <p class="text-[10px] text-slate-600 mt-2">Research only — verify annual reports before investing</p>
+  </article>`;
+}
+
+async function paperBuy(symbol,ev){
   if(ev) ev.stopPropagation();
   const sig = results.find(r=>r.symbol===symbol);
   if(!sig) return;
-  const qty = sig.qty_for_1pct_risk||1;
-  const body = {
-    symbol, qty, strategy:'quick', price:sig.close,
-    stop_loss:sig.stop_loss, tier:'qualified',
-    notes:`tier qualified | hist win ${sig.hist_win_rate}%`,
-  };
+  const body = {symbol, qty:sig.qty_for_1pct_risk, strategy:'quick', price:sig.close, stop_loss:sig.stop_loss, tier:'qualified', notes:`hist win ${sig.hist_win_rate}%`};
   const r = await fetch('/api/paper/buy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const d = await r.json();
-  if(!r.ok){ alert(d.detail||'Buy failed'); return; }
-  paper = d.portfolio;
+  if(!r.ok){ alert(d.detail||'Failed'); return; }
   await loadPaper();
-  alert(`Bought ${qty} ${symbol} @ ₹${fmt(sig.close)}`);
+  alert(`Bought ${body.qty} ${symbol}`);
 }
 
-async function paperSell(id){
-  const r = await fetch(`/api/paper/sell/${id}`,{method:'POST'});
-  const d = await r.json();
-  if(!r.ok){ alert(d.detail||'Sell failed'); return; }
-  await loadPaper();
-}
-
+async function paperSell(id){ await fetch(`/api/paper/sell/${id}`,{method:'POST'}); await loadPaper(); }
 async function resetPaper(){
-  if(!confirm('Reset paper ledger to ₹20,000?')) return;
-  await fetch(`/api/paper/reset?starting_capital=${CAPITAL}`,{method:'POST'});
-  await loadPaper();
-}
-
-function updatePaperActions(symbol){
-  const el = document.getElementById('paperActions');
-  const sig = results.find(r=>r.symbol===symbol);
-  const open = paper?.open_positions?.find(p=>p.symbol===symbol);
-  if(open){
-    el.innerHTML = `<button onclick="paperSell('${open.id}')" class="w-full bg-red-600/80 rounded-xl py-3 text-sm font-semibold">Sell position</button>`;
-  } else if(sig){
-    el.innerHTML = `<button onclick="paperBuyFromSignal('${symbol}')" class="w-full bg-emerald-600 rounded-xl py-3 text-sm font-semibold">Paper buy ${sig.qty_for_1pct_risk} shares</button>`;
-  } else el.innerHTML = '';
+  if(!confirm('Reset to ₹20,000?')) return;
+  await fetch(`/api/paper/reset?starting_capital=${CAPITAL}`,{method:'POST'}); await loadPaper();
 }
 
 function openDetail(symbol){
   detailSymbol = symbol;
   const sig = results.find(r=>r.symbol===symbol);
   if(!sig) return;
-  document.getElementById('detailEmpty').classList.add('hidden');
-  document.getElementById('detailBody').classList.remove('hidden');
   document.getElementById('dSymbol').textContent = symbol;
-  document.getElementById('dClose').textContent = '₹'+fmt(sig.close);
-  document.getElementById('dStop').textContent = '₹'+fmt(sig.stop_loss);
-  document.getElementById('dQty').textContent = sig.qty_for_1pct_risk;
-  document.getElementById('reasons').innerHTML = [...(sig.reasons||[]),sig.entry_note].filter(Boolean).map(r=>`<li>${r}</li>`).join('');
-  document.getElementById('warnings').innerHTML = (sig.warnings||[]).map(w=>`<li>${w}</li>`).join('')||'';
-  updatePaperActions(symbol);
+  const badge = document.getElementById('dBadge');
+  if(scanMode==='quick'){
+    badge.textContent='qualified'; badge.className='ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-900/50 text-emerald-400';
+    document.getElementById('dStats').innerHTML = `
+      <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Price</div><div class="font-semibold">₹${fmt(sig.close)}</div></div>
+      <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Stop</div><div class="font-semibold text-red-300">₹${fmt(sig.stop_loss)}</div></div>
+      <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Qty</div><div class="font-semibold">${sig.qty_for_1pct_risk}</div></div>`;
+    document.getElementById('paperActions').innerHTML = `<button onclick="paperBuy('${symbol}')" class="w-full bg-emerald-600 rounded-xl py-3 text-sm font-semibold">Paper buy ${sig.qty_for_1pct_risk} shares</button>`;
+  } else {
+    badge.textContent=sig.tier; badge.className='ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-violet-900/50 text-violet-400';
+    document.getElementById('dStats').innerHTML = `
+      <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Score</div><div class="font-semibold">${sig.score}</div></div>
+      <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Price</div><div class="font-semibold">₹${fmt(sig.close)}</div></div>
+      <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Mcap</div><div class="font-semibold">${sig.market_cap_cr||'?'} Cr</div></div>`;
+    updateWatchlistActions(symbol);
+  }
+  document.getElementById('reasons').innerHTML = (sig.reasons||[]).map(r=>`<li>${r}</li>`).join('');
+  document.getElementById('warnings').innerHTML = (sig.warnings||[]).map(w=>`<li>${w}</li>`).join('');
   document.getElementById('detailOverlay').classList.remove('hidden');
-  const panel = document.getElementById('detailPanel');
-  panel.classList.remove('translate-y-full');
-  fetch(`/api/stock/${symbol}?capital=${CAPITAL}`).then(r=>r.json()).then(d=>{
-    if(d.candles?.length) drawChart(d.candles, sig.stop_loss);
+  document.getElementById('detailPanel').classList.remove('translate-y-full');
+  fetch(`/api/stock/${symbol}?capital=${CAPITAL}&mode=${scanMode}`).then(r=>r.json()).then(d=>{
+    if(d.candles?.length) drawChart(d.candles, scanMode==='quick'?sig.stop_loss:null);
   });
 }
 
 function closeDetail(){
   document.getElementById('detailOverlay').classList.add('hidden');
   document.getElementById('detailPanel').classList.add('translate-y-full');
-  detailSymbol = null;
 }
 
 function drawChart(candles, stop){
-  const el = document.getElementById('chart');
-  el.innerHTML = '';
-  chart = LightweightCharts.createChart(el,{
-    height:220, layout:{background:{color:'#0d1320'},textColor:'#94a3b8'},
-    grid:{vertLines:{color:'#16203233'},horzLines:{color:'#16203233'}},
-    rightPriceScale:{borderColor:'#1f2937'}, timeScale:{borderColor:'#1f2937'},
-  });
-  const s = chart.addCandlestickSeries({
-    upColor:'#10b981',downColor:'#ef4444',borderVisible:false,
-    wickUpColor:'#10b981',wickDownColor:'#ef4444',
-  });
+  const el = document.getElementById('chart'); el.innerHTML='';
+  chart = LightweightCharts.createChart(el,{height:200,layout:{background:{color:'#0d1320'},textColor:'#94a3b8'},grid:{vertLines:{color:'#16203233'},horzLines:{color:'#16203233'}}});
+  const s = chart.addCandlestickSeries({upColor:'#10b981',downColor:'#ef4444',borderVisible:false,wickUpColor:'#10b981',wickDownColor:'#ef4444'});
   s.setData(candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));
   if(stop) s.createPriceLine({price:stop,color:'#ef4444',lineWidth:1,lineStyle:2,title:'Stop'});
   chart.timeScale().fitContent();
 }
 
 loadPaper(true);
+loadWatchlist();
 </script>
 </body>
 </html>

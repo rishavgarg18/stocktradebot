@@ -26,6 +26,8 @@ INDEX_CSV_URLS = {
     "nifty100": "https://archives.nseindia.com/content/indices/ind_nifty100list.csv",
     "nifty200": "https://archives.nseindia.com/content/indices/ind_nifty200list.csv",
     "nifty500": "https://archives.nseindia.com/content/indices/ind_nifty500list.csv",
+    "smallcap250": "https://archives.nseindia.com/content/indices/ind_niftysmallcap250list.csv",
+    "microcap250": "https://archives.nseindia.com/content/indices/ind_niftymicrocap250_list.csv",
 }
 
 HEADERS = {
@@ -117,6 +119,18 @@ def get_universe(name: str = "nifty500") -> list[str]:
         return symbols
     except Exception:
         return list(NIFTY50_FALLBACK)
+
+
+def get_multibagger_universe() -> list[str]:
+    """Nifty 500 + Microcap 250 — broad coverage for sub-₹50 hunting."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in ("nifty500", "microcap250"):
+        for sym in get_universe(name):
+            if sym not in seen:
+                seen.add(sym)
+                out.append(sym)
+    return out
 
 
 def to_yahoo(symbol: str) -> str:
