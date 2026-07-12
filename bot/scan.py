@@ -18,11 +18,12 @@ def main() -> None:
                     choices=["nifty50", "nifty100", "nifty200", "nifty500"])
     ap.add_argument("--top", type=int, default=10, help="show top N results")
     ap.add_argument("--capital", type=float, default=DEFAULT_CAPITAL)
+    ap.add_argument("--no-catalyst", action="store_true", help="disable event catalyst scoring")
     args = ap.parse_args()
 
     if args.mode == "multibagger":
         symbols = get_multibagger_universe()
-        label = "nifty500+microcap250"
+        label = "nifty500+smallcap250+microcap250"
     else:
         symbols = get_universe(args.universe)
         label = args.universe
@@ -35,20 +36,22 @@ def main() -> None:
     print(file=sys.stderr)
 
     if args.mode == "multibagger":
-        results, diag = scan_multibagger(data, qualified_only=False)
-        print(f"\n=== MULTIBAGGER SCREENER ===")
-        print(f"  Scanned: {diag.get('symbols_scanned', 0)} | sub-₹50: {diag.get('sub50_price_pass', 0)}")
-        print(f"  Passed filters: {diag.get('scored', 0)} | qualified: {diag.get('qualified', 0)} | watch: {diag.get('watch', 0)}")
-        hdr = f"{'SYM':<14}{'PRICE':>8}{'SCORE':>7}{'TIER':>10}{'ROE%':>7}{'REV%':>7}{'6M%':>7}{'MCAP':>8}"
+        results, diag = scan_multibagger(
+            data, qualified_only=False, catalyst_enabled=not args.no_catalyst
+        )
+        print(f"\n=== MULTIBAGGER SCREENER (under ₹{diag.get('max_price', 100)}) ===")
+        print(f"  Band: mcap ₹{diag.get('min_market_cap_cr')}-{diag.get('max_market_cap_cr')} Cr · listed ≤{diag.get('max_listing_age_years')}y")
+        print(f"  Catalyst layer: {'ON' if diag.get('catalyst_enabled') else 'OFF'} | with catalyst signal: {diag.get('with_catalyst_signal', 0)}")
+        print(f"  Passed: {diag.get('scored', 0)} | qualified: {diag.get('qualified', 0)} | watch: {diag.get('watch', 0)}")
+        hdr = f"{'SYM':<14}{'PRICE':>8}{'SCORE':>7}{'CAT':>5}{'TIER':>10}{'MCAP':>7}{'FPE':>6}{'INS%':>6}"
         print(f"\n=== CANDIDATES ({len(results)}) ===\n{hdr}")
         for s in results[: args.top]:
-            print(f"{s.symbol:<14}{s.close:>8.2f}{s.score:>7.1f}{s.tier:>10}"
-                  f"{(s.roe_pct or 0):>7.1f}{(s.revenue_growth_pct or 0):>7.1f}"
-                  f"{(s.roc_6m_pct or 0):>7.1f}{(s.market_cap_cr or 0):>8.0f}")
-            for r in s.reasons[:2]:
+            print(f"{s.symbol:<14}{s.close:>8.2f}{s.score:>7.1f}{s.catalyst_score:>5.1f}{s.tier:>10}"
+                  f"{(s.market_cap_cr or 0):>7.0f}{(s.forward_pe or 0):>6.1f}{(s.insider_pct or 0):>6.0f}")
+            for r in (s.catalyst_alerts or s.reasons)[:2]:
                 print(f"    · {r}")
         if not results:
-            print("No candidates — most sub-₹50 stocks fail quality filters.")
+            print("No candidates — try toggling catalyst layer or check filters.")
         return
 
     nifty = get_history(NIFTY_INDEX_TICKER)

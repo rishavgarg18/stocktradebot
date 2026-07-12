@@ -33,9 +33,9 @@
     <p class="text-sm text-slate-400 mt-1">2-day RSI dip · ₹20,000 · 1% risk</p>
   </header>
   <header class="mb-4 hidden" id="headerMulti">
-    <p class="text-[11px] font-semibold uppercase tracking-widest text-violet-400 mb-1">Sub-₹50 · Strong fundamentals · Growth sectors</p>
+    <p class="text-[11px] font-semibold uppercase tracking-widest text-violet-400 mb-1">Sub-₹100 · Quality · Value · Catalysts</p>
     <h1 class="text-2xl font-bold">Multibagger Hunt</h1>
-    <p class="text-sm text-slate-400 mt-1">Research screener — not a buy signal. Deep-dive before investing.</p>
+    <p class="text-sm text-slate-400 mt-1">Nifty 500 + Smallcap + Microcap · research only.</p>
   </header>
 
   <!-- Controls -->
@@ -54,8 +54,14 @@
         <div class="mt-1 bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2.5 text-sm">₹20,000</div>
       </div>
     </div>
-    <div id="multiControls" class="hidden text-xs text-slate-500 bg-slate-800/40 rounded-xl p-3">
-      Scans <b class="text-slate-300">Nifty 500 + Microcap 250</b> (~750 stocks) for price &lt; ₹50 with strong fundamentals &amp; growth themes.
+    <div id="multiControls" class="hidden space-y-3">
+      <div class="text-xs text-slate-500 bg-slate-800/40 rounded-xl p-3">
+        Scans <b class="text-slate-300">Nifty 500 + Smallcap + Microcap</b> — under <b class="text-slate-300">₹100</b>, mcap <b class="text-slate-300">₹500–30,000 Cr</b>, listed within <b class="text-slate-300">10 years</b>.
+      </div>
+      <label class="flex items-center justify-between bg-slate-800/40 rounded-xl px-3 py-2.5 cursor-pointer">
+        <span class="text-xs text-slate-300">Event catalyst layer <span class="text-slate-500">(volume surge · gap-up · breakout)</span></span>
+        <input id="catalystToggle" type="checkbox" checked class="w-4 h-4 accent-violet-500" onchange="saveCatalystPref()" />
+      </label>
     </div>
     <button id="scanBtn" onclick="startScan()" class="w-full bg-emerald-600 hover:bg-emerald-500 rounded-xl py-3.5 text-sm font-bold">
       Scan for qualified setups
@@ -137,13 +143,19 @@
     </div>
   </div>
 
-  <p class="text-[10px] text-slate-600 text-center leading-relaxed">Not investment advice. Multibagger scan is research only — most sub-₹50 stocks are traps.</p>
+  <p class="text-[10px] text-slate-600 text-center leading-relaxed">Not investment advice. Catalyst alerts flag unusual volume — verify news manually.</p>
 </div>
 
 <script>
 const CAPITAL = 20000;
 let scanMode = 'quick', results = [], paper = null, watchlist = null, watchlistSymbols = new Set();
 let detailSymbol = null, scanDiagnostics = null, chart = null;
+let catalystEnabled = localStorage.getItem('catalystEnabled') !== 'false';
+
+function saveCatalystPref(){
+  catalystEnabled = document.getElementById('catalystToggle').checked;
+  localStorage.setItem('catalystEnabled', catalystEnabled);
+}
 
 function fmt(n){ return n==null?'—':Number(n).toLocaleString('en-IN',{maximumFractionDigits:2}); }
 function fmtPnl(n){ if(n==null)return '—'; return (n>=0?'+':'')+Number(n).toLocaleString('en-IN',{maximumFractionDigits:2}); }
@@ -159,7 +171,9 @@ function setMode(m){
   document.getElementById('multiControls').classList.toggle('hidden', m!=='multibagger');
   document.getElementById('paperSection').classList.toggle('hidden', m!=='quick');
   document.getElementById('watchlistSection').classList.toggle('hidden', m!=='multibagger');
-  document.getElementById('scanBtn').textContent = m==='quick' ? 'Scan for qualified setups' : 'Hunt multibaggers under ₹50';
+  document.getElementById('scanBtn').textContent = m==='quick' ? 'Scan for qualified setups' : 'Scan compounders under ₹100';
+  const catToggle = document.getElementById('catalystToggle');
+  if(catToggle) catToggle.checked = catalystEnabled;
   document.getElementById('scanBtn').className = m==='quick'
     ? 'w-full bg-emerald-600 hover:bg-emerald-500 rounded-xl py-3.5 text-sm font-bold'
     : 'w-full bg-violet-600 hover:bg-violet-500 rounded-xl py-3.5 text-sm font-bold';
@@ -286,9 +300,12 @@ async function startScan(){
   document.getElementById('initialState').classList.add('hidden');
   try {
     const u = document.getElementById('universe').value;
+    const cat = document.getElementById('catalystToggle')?.checked ?? true;
+    catalystEnabled = cat;
+    localStorage.setItem('catalystEnabled', cat);
     const url = scanMode==='quick'
       ? `/api/scan?universe=${u}&capital=${CAPITAL}&mode=quick&sync=true`
-      : `/api/scan?capital=${CAPITAL}&mode=multibagger&sync=true`;
+      : `/api/scan?capital=${CAPITAL}&mode=multibagger&sync=true&catalyst_enabled=${cat}`;
     const res = await fetch(url,{method:'POST'});
     const s = JSON.parse(await res.text());
     if(!res.ok||s.status==='error') throw new Error(s.error||'Scan failed');
@@ -316,10 +333,10 @@ function renderDiagnostics(){
     ].filter(Boolean).map(x=>`<div>${x}</div>`).join('');
   } else {
     body.innerHTML = [
-      `<p>Scanned <b>${d.symbols_scanned}</b> stocks across Nifty 500 + Microcap 250</p>`,
-      `<p><b>${d.sub50_price_pass}</b> under ₹50 → <b>${d.scored}</b> passed quality filters → <b>${d.qualified}</b> qualified, <b>${d.watch||0}</b> watch</p>`,
-      !d.returned?`<p class="text-amber-300">No multibagger candidates today. Most sub-₹50 stocks are traps (PSU banks, loss-makers).</p>`:'',
-      `<p class="text-slate-500">Min market cap ₹${d.min_market_cap_cr} Cr · min ₹1 Cr/day turnover · must be profitable &amp; growing</p>`,
+      `<p>Scanned <b>${d.symbols_scanned}</b> · <b>${d.under100_price_pass||0}</b> under ₹${d.max_price} · mcap ₹${d.min_market_cap_cr}–${d.max_market_cap_cr} Cr · listed ≤${d.max_listing_age_years||10}y</p>`,
+      `<p><b>${d.scored}</b> passed quality filters → <b>${d.qualified}</b> qualified, <b>${d.watch||0}</b> watch</p>`,
+      d.catalyst_enabled?`<p class="text-violet-300/80">Catalyst layer ON · ${d.with_catalyst_signal||0} with volume/gap/breakout signal</p>`:`<p class="text-slate-500">Catalyst layer OFF (fundamentals only)</p>`,
+      !d.returned?`<p class="text-amber-300">No candidates today.</p>`:'',
     ].filter(Boolean).map(x=>`<div>${x}</div>`).join('');
   }
 }
@@ -335,7 +352,7 @@ function renderSignals(){
     document.getElementById('emptyTitle').textContent = scanMode==='quick'?'No qualified setups':'No multibagger candidates';
     document.getElementById('emptyMsg').textContent = scanMode==='quick'
       ? 'Zero signals is normal. Wait for full gate pass — do not force trades.'
-      : 'Most sub-₹50 stocks fail quality filters (IDEA, YESBANK, UCOBANK etc.). That is by design.';
+      : 'No stocks passed quality, valuation and governance filters today.';
     return;
   }
   empty.classList.add('hidden');
@@ -358,23 +375,25 @@ function quickCard(r){
 function multiCard(r){
   const tierColor = r.tier==='qualified'?'text-violet-400':'text-amber-400';
   const saved = watchlistSymbols.has(r.symbol);
+  const catBadge = r.catalyst_score>0?`<span class="bg-amber-900/40 text-amber-300 px-2 py-0.5 rounded text-[10px]">⚡ ${r.catalyst_score}</span>`:'';
   return `<article class="signal-card card p-4 border-violet-900/20" onclick="openDetail('${r.symbol}')">
     <div class="flex justify-between mb-1">
       <span class="text-lg font-bold">${r.symbol}</span>
       <div class="flex items-center gap-2">
+        ${catBadge}
         <span class="text-sm font-bold ${tierColor}">${r.score}/100</span>
-        <button onclick="saveToWatchlist('${r.symbol}',event)" class="text-lg leading-none ${saved?'text-violet-400':'text-slate-600'}" title="${saved?'Saved':'Save'}">${saved?'★':'☆'}</button>
+        <button onclick="saveToWatchlist('${r.symbol}',event)" class="text-lg leading-none ${saved?'text-violet-400':'text-slate-600'}">${saved?'★':'☆'}</button>
       </div>
     </div>
-    <div class="text-[11px] text-slate-500 mb-2">${r.industry||r.sector} · ₹${fmt(r.close)} · ${r.market_cap_cr||'?'} Cr mcap</div>
+    <div class="text-[11px] text-slate-500 mb-2">${r.industry||r.sector} · ₹${fmt(r.close)} · ${r.market_cap_cr||'?'} Cr</div>
     <div class="flex flex-wrap gap-2 text-[10px] mb-2">
       ${r.roe_pct!=null?`<span class="bg-slate-800 px-2 py-0.5 rounded">ROE ${r.roe_pct}%</span>`:''}
-      ${r.revenue_growth_pct!=null?`<span class="bg-slate-800 px-2 py-0.5 rounded">Rev +${r.revenue_growth_pct}%</span>`:''}
-      ${r.profit_margin_pct!=null?`<span class="bg-slate-800 px-2 py-0.5 rounded">Margin ${r.profit_margin_pct}%</span>`:''}
-      ${r.roc_6m_pct!=null?`<span class="bg-slate-800 px-2 py-0.5 rounded">6M ${r.roc_6m_pct>0?'+':''}${r.roc_6m_pct}%</span>`:''}
+      ${r.forward_pe!=null?`<span class="bg-slate-800 px-2 py-0.5 rounded">FPE ${r.forward_pe}</span>`:''}
+      ${r.insider_pct!=null?`<span class="bg-slate-800 px-2 py-0.5 rounded">Ins ${r.insider_pct}%</span>`:''}
+      ${r.volume_ratio!=null&&r.volume_ratio>=2?`<span class="bg-amber-900/30 px-2 py-0.5 rounded">Vol ${r.volume_ratio}×</span>`:''}
     </div>
-    <p class="text-[11px] text-slate-400 line-clamp-2">${(r.reasons||[]).slice(0,2).join(' · ')}</p>
-    <p class="text-[10px] text-slate-600 mt-2">Research only — verify annual reports before investing</p>
+    ${(r.catalyst_alerts||[]).length?`<p class="text-[11px] text-amber-300/90 mb-1">${r.catalyst_alerts[0]}</p>`:''}
+    <p class="text-[11px] text-slate-400 line-clamp-2">${(r.reasons||[]).filter(x=>!(r.catalyst_alerts||[]).includes(x)).slice(0,2).join(' · ')}</p>
   </article>`;
 }
 
@@ -414,7 +433,7 @@ function openDetail(symbol){
     document.getElementById('dStats').innerHTML = `
       <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Score</div><div class="font-semibold">${sig.score}</div></div>
       <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Price</div><div class="font-semibold">₹${fmt(sig.close)}</div></div>
-      <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Mcap</div><div class="font-semibold">${sig.market_cap_cr||'?'} Cr</div></div>`;
+      <div class="bg-slate-800/50 rounded-lg p-2"><div class="text-slate-500">Catalyst</div><div class="font-semibold ${sig.catalyst_score>0?'text-amber-300':''}">${sig.catalyst_score||0}</div></div>`;
     updateWatchlistActions(symbol);
   }
   document.getElementById('reasons').innerHTML = (sig.reasons||[]).map(r=>`<li>${r}</li>`).join('');
@@ -442,6 +461,7 @@ function drawChart(candles, stop){
 
 loadPaper(true);
 loadWatchlist();
+document.getElementById('catalystToggle').checked = catalystEnabled;
 </script>
 </body>
 </html>

@@ -39,12 +39,12 @@ _scan_state: dict = {
 }
 
 
-def _run_scan(universe: str, capital: float, mode: str) -> None:
+def _run_scan(universe: str, capital: float, mode: str, catalyst_enabled: bool = True) -> None:
     global _scan_state
     try:
         if mode == "multibagger":
             symbols = get_multibagger_universe()
-            universe_label = "nifty500+microcap250"
+            universe_label = "nifty500+smallcap250+microcap250"
         else:
             symbols = get_universe(universe)
             universe_label = universe
@@ -57,7 +57,9 @@ def _run_scan(universe: str, capital: float, mode: str) -> None:
         data = get_histories(symbols, progress_cb=cb)
 
         if mode == "multibagger":
-            signals, diagnostics = scan_multibagger(data, qualified_only=False)
+            signals, diagnostics = scan_multibagger(
+                data, qualified_only=False, catalyst_enabled=catalyst_enabled
+            )
             results = [asdict(s) for s in signals]
         else:
             nifty = get_history(NIFTY_INDEX_TICKER)
@@ -97,6 +99,7 @@ def start_scan(
     capital: float = DEFAULT_CAPITAL,
     mode: str = "quick",
     sync: bool = False,
+    catalyst_enabled: bool = True,
 ):
     if mode not in ("quick", "multibagger"):
         raise HTTPException(400, f"unknown mode {mode!r}")
@@ -108,7 +111,7 @@ def start_scan(
             status="running", progress=0, total=0, results=[],
             universe=universe, mode=mode, error=None, scan_diagnostics=None,
         )
-        _run_scan(universe, capital, mode)
+        _run_scan(universe, capital, mode, catalyst_enabled=catalyst_enabled)
         return _scan_state
 
     with _scan_lock:
@@ -119,7 +122,10 @@ def start_scan(
             universe=universe, mode=mode, error=None, scan_diagnostics=None,
         )
         threading.Thread(
-            target=_run_scan, args=(universe, capital, mode), daemon=True
+            target=_run_scan,
+            args=(universe, capital, mode),
+            kwargs={"catalyst_enabled": catalyst_enabled},
+            daemon=True,
         ).start()
     return {"status": "started"}
 
@@ -130,7 +136,12 @@ def scan_status():
 
 
 @app.get("/api/stock/{symbol}")
-def stock_detail(symbol: str, capital: float = DEFAULT_CAPITAL, mode: str = "quick"):
+def stock_detail(
+    symbol: str,
+    capital: float = DEFAULT_CAPITAL,
+    mode: str = "quick",
+    catalyst_enabled: bool = True,
+):
     symbol = symbol.upper()
     df = get_history(symbol)
     if df is None:
@@ -154,7 +165,7 @@ def stock_detail(symbol: str, capital: float = DEFAULT_CAPITAL, mode: str = "qui
     ]
 
     if mode == "multibagger":
-        sig = evaluate_multibagger(symbol, df)
+        sig = evaluate_multibagger(symbol, df, catalyst_enabled=catalyst_enabled)
         return {
             "symbol": symbol,
             "signal": asdict(sig) if sig else None,

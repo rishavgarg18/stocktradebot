@@ -1,6 +1,6 @@
 {
   "starting_capital": 20000,
-  "cash": 14292.0,
+  "cash": 17424.3,
   "trades": [
     {
       "id": "570c4532",
@@ -29,12 +29,12 @@
       "stop_loss": 959.84,
       "target1": null,
       "target2": null,
-      "status": "open",
-      "exit_price": null,
-      "exit_date": null,
-      "pnl": null,
-      "pnl_pct": null,
-      "notes": "tier qualified | hist win 65%"
+      "status": "closed",
+      "exit_price": 1044.1,
+      "exit_date": "2026-07-11",
+      "pnl": 89.1,
+      "pnl_pct": 2.93,
+      "notes": "tier qualified | hist win 65% | auto: day2-close"
     }
   ]
 }

@@ -21,12 +21,14 @@ from .universe import to_yahoo
 
 CACHE_DIR = CACHE_BASE / "fundamentals"
 CACHE_TTL_SECONDS = 7 * 24 * 3600
+_SCHEMA_KEYS = {"heldPercentInsiders", "enterpriseToEbitda", "returnOnAssets"}
 
 FIELDS = [
     "sector",
     "industry",
     "marketCap",
     "returnOnEquity",
+    "returnOnAssets",
     "profitMargins",
     "operatingMargins",
     "revenueGrowth",
@@ -34,11 +36,18 @@ FIELDS = [
     "debtToEquity",
     "trailingPE",
     "forwardPE",
+    "pegRatio",
     "priceToBook",
     "bookValue",
+    "enterpriseToEbitda",
     "fiftyTwoWeekHigh",
     "fiftyTwoWeekLow",
     "freeCashflow",
+    "heldPercentInsiders",
+    "heldPercentInstitutions",
+    "currentRatio",
+    "totalDebt",
+    "totalCash",
 ]
 
 
@@ -53,8 +62,10 @@ def get_fundamentals(symbol: str) -> dict:
     if path.exists():
         try:
             payload = json.loads(path.read_text())
-            if time.time() - payload["fetched_at"] < CACHE_TTL_SECONDS:
-                return payload["data"]
+            data = payload.get("data", {})
+            fresh = time.time() - payload["fetched_at"] < CACHE_TTL_SECONDS
+            if fresh and _SCHEMA_KEYS.issubset(data.keys()):
+                return data
         except (json.JSONDecodeError, KeyError):
             pass
 

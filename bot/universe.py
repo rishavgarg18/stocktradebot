@@ -122,10 +122,10 @@ def get_universe(name: str = "nifty500") -> list[str]:
 
 
 def get_multibagger_universe() -> list[str]:
-    """Nifty 500 + Microcap 250 — broad coverage for sub-₹50 hunting."""
+    """Nifty 500 + Smallcap 250 + Microcap 250 for sub-₹100 compounder hunt."""
     seen: set[str] = set()
     out: list[str] = []
-    for name in ("nifty500", "microcap250"):
+    for name in ("nifty500", "smallcap250", "microcap250"):
         for sym in get_universe(name):
             if sym not in seen:
                 seen.add(sym)

@@ -1,3 +1,70 @@
 {
-  "items": []
+  "items": [
+    {
+      "symbol": "MSUMI",
+      "added_at": "2026-07-11",
+      "entry_price": 40.14,
+      "score": 59.0,
+      "tier": "watch",
+      "sector": "Consumer Cyclical",
+      "industry": "Auto Parts",
+      "market_cap_cr": 26619.5,
+      "roe_pct": 32.4,
+      "revenue_growth_pct": 33.1,
+      "reasons": [
+        "Strong ROE 32%",
+        "Revenue +33% YoY",
+        "Positive free cash flow",
+        "Promoter holding 62%",
+        "Growth theme: auto"
+      ],
+      "notes": "",
+      "current_price": null,
+      "pct_change": null
+    },
+    {
+      "symbol": "SBFC",
+      "added_at": "2026-07-11",
+      "entry_price": 91.96,
+      "score": 63.0,
+      "tier": "watch",
+      "sector": "Financial Services",
+      "industry": "Credit Services",
+      "market_cap_cr": 10176.3,
+      "roe_pct": 13.0,
+      "revenue_growth_pct": 21.8,
+      "reasons": [
+        "Good ROE 13%",
+        "Healthy margins 45%",
+        "Revenue +22% YoY",
+        "Earnings +30% YoY",
+        "PEG 0.5"
+      ],
+      "notes": "",
+      "current_price": null,
+      "pct_change": null
+    },
+    {
+      "symbol": "SAGILITY",
+      "added_at": "2026-07-11",
+      "entry_price": 42.53,
+      "score": 72.0,
+      "tier": "qualified",
+      "sector": "Healthcare",
+      "industry": "Health Information Services",
+      "market_cap_cr": 19909.7,
+      "roe_pct": 10.3,
+      "revenue_growth_pct": 29.1,
+      "reasons": [
+        "Healthy margins 13%",
+        "Revenue +29% YoY",
+        "Earnings +44% YoY",
+        "Positive free cash flow",
+        "Attractive forward PE 15"
+      ],
+      "notes": "",
+      "current_price": null,
+      "pct_change": null
+    }
+  ]
 }
